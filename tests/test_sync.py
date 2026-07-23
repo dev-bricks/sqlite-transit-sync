@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import tempfile
+import unittest
+from pathlib import Path
+
+from sqlite_transit_sync import SyncConfig, SyncError, TransitSync
+
+
+SCHEMA = """
+CREATE TABLE items (
+    id TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE secrets (
+    id TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE local_only (
+    id TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"""
+
+
+def create_db(path: Path, item_value: str, timestamp: str) -> None:
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(SCHEMA)
+        connection.execute("INSERT INTO items VALUES ('shared', ?, ?)", (item_value, timestamp))
+        connection.execute("INSERT INTO secrets VALUES ('token', ?, ?)", (item_value, timestamp))
+        connection.execute("INSERT INTO local_only VALUES ('local', ?)", (item_value,))
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def item(path: Path, table: str, key: str) -> tuple | None:
+    connection = sqlite3.connect(path)
+    try:
+        return connection.execute(f"SELECT * FROM [{table}] WHERE id = ?", (key,)).fetchone()
+    finally:
+        connection.close()
+
+
+class TransitSyncTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.transit = self.root / "transit"
+        self.a_db = self.root / "a.db"
+        self.b_db = self.root / "b.db"
+        create_db(self.a_db, "A1", "2026-01-01T00:00:00Z")
+        create_db(self.b_db, "B0", "2025-01-01T00:00:00Z")
+        self.a = TransitSync(
+            SyncConfig(self.a_db, self.transit, self.root / "a-state.json", "node-a", "demo")
+        )
+        self.b = TransitSync(
+            SyncConfig(self.b_db, self.transit, self.root / "b-state.json", "node-b", "demo")
+        )
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def test_roundtrip_is_row_level_idempotent_and_excludes_secrets(self) -> None:
+        snapshot_a = self.a.push()
+        self.assertTrue(snapshot_a.manifest_path.is_file())
+        self.assertIsNone(item(snapshot_a.path, "secrets", "token"))
+        reports = self.b.pull()
+        self.assertEqual(1, reports[0].updated)
+        self.assertEqual("A1", item(self.b_db, "items", "shared")[1])
+        self.assertEqual("B0", item(self.b_db, "secrets", "token")[1])
+        self.assertEqual([], self.b.pull())
+
+        connection = sqlite3.connect(self.b_db)
+        try:
+            connection.execute(
+                "UPDATE items SET value = ?, updated_at = ? WHERE id = 'shared'",
+                ("B2", "2027-01-01T00:00:00Z"),
+            )
+            connection.execute(
+                "INSERT INTO items VALUES ('new-on-b', 'new', '2027-01-01T00:00:00Z')"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        self.b.push()
+        reports = self.a.pull()
+        self.assertEqual(1, reports[-1].updated)
+        self.assertEqual(1, reports[-1].inserted)
+        self.assertEqual("B2", item(self.a_db, "items", "shared")[1])
+        self.assertEqual("new", item(self.a_db, "items", "new-on-b")[1])
+
+    def test_snapshot_redaction_removes_secret_bytes_from_file(self) -> None:
+        secret = "snapshot-redaction-secret-2026-07-13"
+        connection = sqlite3.connect(self.a_db)
+        try:
+            connection.execute(
+                "UPDATE secrets SET value = ?, updated_at = ? WHERE id = 'token'",
+                (secret, "2026-02-01T00:00:00Z"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        snapshot = self.a.push()
+
+        self.assertIsNone(item(snapshot.path, "secrets", "token"))
+        self.assertNotIn(secret.encode("utf-8"), snapshot.path.read_bytes())
+
+    def test_own_snapshot_is_not_pending(self) -> None:
+        self.a.push()
+        self.assertEqual([], self.a.pending())
+        self.assertEqual(1, len(self.b.pending()))
+
+    def test_checksum_mismatch_blocks_pull_without_advancing_state(self) -> None:
+        snapshot = self.a.push()
+        snapshot.path.write_bytes(snapshot.path.read_bytes() + b"tampered")
+        with self.assertRaises(SyncError):
+            self.b.pull()
+        self.assertFalse((self.root / "b-state.json").exists())
+
+    def test_config_roundtrip_and_relative_paths(self) -> None:
+        config_path = self.root / "config" / "node.json"
+        config_path.parent.mkdir()
+        config_path.write_text(
+            json.dumps(
+                {
+                    "database": "../a.db",
+                    "transit": "../transit",
+                    "state": "state.json",
+                    "node_id": "neutral node",
+                    "namespace": "sample app",
+                }
+            ),
+            encoding="utf-8",
+        )
+        config = SyncConfig.from_file(config_path)
+        self.assertEqual("neutral-node", config.node_id)
+        self.assertEqual("sample-app", config.namespace)
+        self.assertEqual((self.root / "a.db").resolve(), config.database)
+        self.assertEqual((config_path.parent / "state.json").resolve(), config.state)
+
+    def test_pull_requires_precreated_application_schema(self) -> None:
+        self.a.push()
+        missing = TransitSync(
+            SyncConfig(
+                self.root / "missing.db",
+                self.transit,
+                self.root / "missing-state.json",
+                "node-c",
+                "demo",
+            )
+        )
+        with self.assertRaises(SyncError):
+            missing.pull()
+
+    def test_equal_timestamp_conflict_converges_deterministically(self) -> None:
+        timestamp = "2026-02-01T00:00:00Z"
+        for database, value in ((self.a_db, "alpha"), (self.b_db, "omega")):
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute(
+                    "UPDATE items SET value = ?, updated_at = ? WHERE id = 'shared'",
+                    (value, timestamp),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+        self.a.push()
+        self.b.push()
+        self.a.pull()
+        self.b.pull()
+        self.assertEqual(item(self.a_db, "items", "shared"), item(self.b_db, "items", "shared"))
+        self.assertEqual("omega", item(self.a_db, "items", "shared")[1])
+
+    def test_schema_drift_uses_only_shared_columns(self) -> None:
+        connection = sqlite3.connect(self.a_db)
+        try:
+            connection.execute("ALTER TABLE items ADD COLUMN local_note TEXT")
+            connection.execute(
+                "UPDATE items SET value = 'newer', updated_at = '2028-01-01T00:00:00Z', "
+                "local_note = 'only-on-a' WHERE id = 'shared'"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        self.a.push()
+        report = self.b.pull()[0]
+        self.assertEqual(1, report.updated)
+        self.assertEqual("newer", item(self.b_db, "items", "shared")[1])
+
+
+if __name__ == "__main__":
+    unittest.main()

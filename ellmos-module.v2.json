@@ -1,0 +1,42 @@
+{
+  "schema": "ellmos.module.v2",
+  "id": "sqlite-transit-sync",
+  "display_name": "sqlite-transit-sync",
+  "category": "sync",
+  "kind": "library",
+  "status": "development",
+  "visibility": "public-candidate",
+  "provides": [
+    "sync.database",
+    "sync.database.sqlite",
+    "snapshot.verified"
+  ],
+  "requires": [],
+  "optional": [
+    "sync.files"
+  ],
+  "conflicts": [],
+  "surfaces": [
+    "library",
+    "cli"
+  ],
+  "state": {
+    "ownership": "module",
+    "location": "user-home"
+  },
+  "boundaries": {
+    "network": "transport-defined",
+    "data": "application-defined",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  "source_of_truth": {
+    "type": "local-directory",
+    "path": ".",
+    "repository": null
+  },
+  "adapters": []
+}

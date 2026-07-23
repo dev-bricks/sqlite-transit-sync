@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sqlite-transit-sync"
+version = "0.1.0"
+description = "Local-first SQLite synchronization through verified snapshots and configurable row-level merge policies."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{name = "Lukas Geiger / ellmos / BACH Contributors"}]
+keywords = ["sqlite", "synchronization", "offline-first", "snapshot", "database"]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+sqlite-transit-sync = "sqlite_transit_sync.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sqlite_transit_sync*"]
+

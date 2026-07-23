@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "name": "sqlite-transit-sync",
+  "version": "0.1.0",
+  "status": "development",
+  "type": "python-module",
+  "package": "sqlite_transit_sync",
+  "entrypoint": "sqlite-transit-sync",
+  "origin": {
+    "system": "BACH",
+    "component": "system/hub/db_sync.py",
+    "feature": "ProSync"
+  },
+  "capabilities": [
+    "sqlite-backup",
+    "snapshot-transit",
+    "row-level-merge",
+    "schema-drift-tolerance",
+    "json-cli"
+  ],
+  "runtime_dependencies": [],
+  "data_policy": "local-live-database; shared-verified-snapshots",
+  "license": "MIT"
+}
+
