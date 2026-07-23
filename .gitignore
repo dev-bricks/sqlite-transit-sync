@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *.py[cod]
+*.pyc
 *.egg-info/
 .pytest_cache/
 .coverage
@@ -14,6 +15,9 @@ build/
 *.sqlite-snapshot
 *.partial
 sync-state.json
+.idea/
+.vscode/
+data/
 .claude/settings.local.json
 .claude/.cache/
 .claude/state/

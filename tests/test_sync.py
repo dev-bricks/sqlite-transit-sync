@@ -96,12 +96,12 @@ class TransitSyncTests(unittest.TestCase):
         self.assertEqual("new", item(self.a_db, "items", "new-on-b")[1])
 
     def test_snapshot_redaction_removes_secret_bytes_from_file(self) -> None:
-        secret = "snapshot-redaction-secret-2026-07-13"
+        sensitive_value = "snapshot-redaction-fixture-2026-07-13"
         connection = sqlite3.connect(self.a_db)
         try:
             connection.execute(
                 "UPDATE secrets SET value = ?, updated_at = ? WHERE id = 'token'",
-                (secret, "2026-02-01T00:00:00Z"),
+                (sensitive_value, "2026-02-01T00:00:00Z"),
             )
             connection.commit()
         finally:
@@ -110,7 +110,7 @@ class TransitSyncTests(unittest.TestCase):
         snapshot = self.a.push()
 
         self.assertIsNone(item(snapshot.path, "secrets", "token"))
-        self.assertNotIn(secret.encode("utf-8"), snapshot.path.read_bytes())
+        self.assertNotIn(sensitive_value.encode("utf-8"), snapshot.path.read_bytes())
 
     def test_own_snapshot_is_not_pending(self) -> None:
         self.a.push()
