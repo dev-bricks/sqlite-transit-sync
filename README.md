@@ -1,5 +1,13 @@
 # sqlite-transit-sync
 
+[English](README.md) | [Deutsch](README_de.md)
+
+[![License](https://img.shields.io/github/license/dev-bricks/sqlite-transit-sync)](LICENSE)
+[![Python Version](https://img.shields.io/badge/python->=3.10-blue.svg)](https://www.python.org/)
+[![Architecture](https://img.shields.io/badge/architecture-local--first-success.svg)](#part-of-the-ellmos-stack-family)
+[![Tests](https://img.shields.io/badge/tests-8%2F8%20passed-brightgreen.svg)](#tests)
+[![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
+
 Local-first synchronization for independent SQLite databases through verified
 snapshots and application-selectable merge policies. It is extracted from the
 BACH ProSync architecture without BACH, OneDrive, host-name, or user-path
@@ -15,6 +23,24 @@ Pairs well with [sync-master](https://github.com/dev-bricks/sync-master)
 point `--transit` at a tool-owned `db-transit/<namespace>/` zone inside the
 yard (its protocol rule R9). sync-master carries the documents, this module
 owns database integrity and merging; both stay independent.
+
+## Architecture & Data Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant NodeA as Node A (app.db)
+    participant Transit as Shared Transit (db-transit)
+    participant NodeB as Node B (app.db)
+
+    Note over NodeA: Live local writes
+    NodeA->>NodeA: SQLite Backup API (Online Snapshot)
+    NodeA->>Transit: Push atomic snapshot & SHA-256 manifest
+    Note over Transit: Verified Transit Storage (R9)
+    NodeB->>Transit: Read manifest & PRAGMA quick_check
+    NodeB->>NodeB: Transactional Row Merge (LWW / Policy)
+    Note over NodeB: Eventual Consistency Reached
+```
 
 ## Part of the ellmos stack family
 
@@ -165,6 +191,10 @@ across several permanently operated nodes.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md), [README_de.md](README_de.md) and
 [SECURITY.md](SECURITY.md).
+
+## Machine-Readable Index
+
+For AI agents, LLMs, and automated tools, a structured sitemap and API index is available at [llms.txt](llms.txt).
 
 ## Tests
 

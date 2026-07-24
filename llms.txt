@@ -1,0 +1,87 @@
+# sqlite-transit-sync
+
+> Local-first SQLite synchronization through verified transit snapshots and configurable row-level merge policies. Extracted from the BACH ProSync architecture for standalone, zero-dependency Python projects.
+
+- Last-checked: 2026-07-25
+- Version: 0.1.0
+- Architecture: Local-First / Zero-Dependency / Snapshot-based Transit
+- Module Family: `dev-bricks/sync-master` companion (`sync.database`)
+
+## System Overview
+
+`sqlite-transit-sync` is a Python 3.10+ zero-dependency library and CLI for synchronizing local SQLite databases across untrusted or asynchronous file transports (shared folders, object-store mounts, removable drives, or sync-master yards).
+
+It avoids live SQLite database locking over file sync by using:
+1. Online consistent snapshots via SQLite Backup API (`sqlite3.Connection.backup`).
+2. Atomic snapshot publication using temporary files and `os.replace`.
+3. Pre-merge integrity checks via `PRAGMA quick_check` and SHA-256 manifest verification.
+4. Deterministic, transactional row-level merge policies (Last-Write-Wins per PK for timestamped tables, shared-column merge for schema drift).
+
+## Key Features
+
+- **Zero External Dependencies**: Standard library Python 3.10+ only.
+- **Atomic & Safe Transit**: Never syncs live SQLite files directly. Uses isolated snapshot zones.
+- **Configurable Merge Policies**: Built-in `LastWriteWinsPolicy` and support for custom domain `MergePolicy` implementations (tombstones, CRDTs).
+- **Data Privacy & Exclusion**: Exclude sensitive tables from transit snapshots with post-delete `VACUUM`.
+- **CLI & Python API**: Declarative JSON configuration (`node.json`) and programmatic `TransitSync` API.
+
+## Core Workflows & CLI Reference
+
+```bash
+# Initialize node configuration
+sqlite-transit-sync init \
+  --config node.json \
+  --database ./app.db \
+  --transit ./shared-transit \
+  --node-id laptop \
+  --namespace my-app
+
+# Publish local snapshot to transit directory
+sqlite-transit-sync push --config node.json
+
+# Dry-run merge check from transit directory
+sqlite-transit-sync pull --config node.json --dry-run
+
+# Execute transactional pull and merge into local app.db
+sqlite-transit-sync pull --config node.json
+
+# Check synchronization status
+sqlite-transit-sync status --config node.json
+
+# Verify integrity of local database and transit manifests
+sqlite-transit-sync verify --config node.json
+```
+
+## Python API Usage
+
+```python
+from sqlite_transit_sync import SyncConfig, TransitSync
+
+config = SyncConfig.from_file("node.json")
+sync = TransitSync(config)
+
+# Publish snapshot
+snapshot = sync.push()
+print(f"Snapshot created: {snapshot.sha256}")
+
+# Pull and merge incoming node snapshots
+reports = sync.pull()
+for r in reports:
+    print(f"Merged node {r.source_node_id}: {r.rows_inserted} inserted, {r.rows_updated} updated")
+```
+
+## Recommended Search Phrases
+
+- `sqlite synchronization python zero-dependency`
+- `local-first database merge LWW`
+- `offline-first sqlite transit snapshot`
+- `sync-master companion db-transit`
+- `row-level last-write-wins sqlite merge`
+- `sqlite backup API transit manifest SHA-256`
+
+## Repository & Ecosystem Links
+
+- **Repository**: [dev-bricks/sqlite-transit-sync](https://github.com/dev-bricks/sqlite-transit-sync)
+- **File Transport Companion**: [dev-bricks/sync-master](https://github.com/dev-bricks/sync-master)
+- **Ecosystem Catalog**: [ellmos-ai/stacks](https://github.com/ellmos-ai/stacks)
+- **Main Organization**: [dev-bricks](https://github.com/dev-bricks)

@@ -1,5 +1,13 @@
 # sqlite-transit-sync
 
+[English](README.md) | [Deutsch](README_de.md)
+
+[![License](https://img.shields.io/github/license/dev-bricks/sqlite-transit-sync)](LICENSE)
+[![Python Version](https://img.shields.io/badge/python->=3.10-blue.svg)](https://www.python.org/)
+[![Architecture](https://img.shields.io/badge/architecture-local--first-success.svg)](#teil-der-ellmos-stack-familie)
+[![Tests](https://img.shields.io/badge/tests-8%2F8%20passed-brightgreen.svg)](#kurzstart)
+[![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
+
 `sqlite-transit-sync` gleicht unabhängige lokale SQLite-Datenbanken über geprüfte
 Snapshots und anpassbare Merge-Regeln ab. Das Modul wurde aus der
 BACH-ProSync-Architektur extrahiert und enthält keine BACH-, OneDrive-, Rechner-
@@ -16,6 +24,24 @@ Transit-Transport — `--transit` auf eine tool-eigene Zone
 `db-transit/<namespace>/` im Yard zeigen lassen (dort Protokoll-Regel R9).
 sync-master trägt die Dokumente, dieses Modul verantwortet
 Datenbank-Integrität und Merge; beide bleiben unabhängig.
+
+## Architektur & Datenfluss
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant NodeA as Knoten A (app.db)
+    participant Transit as Shared Transit (db-transit)
+    participant NodeB as Knoten B (app.db)
+
+    Note over NodeA: Lokale Schreibzugriffe
+    NodeA->>NodeA: SQLite Backup API (Online-Snapshot)
+    NodeA->>Transit: Atomarer Push: Snapshot & SHA-256 Manifest
+    Note over Transit: Geprüfte Transit-Zone (R9)
+    NodeB->>Transit: Manifest-Prüfung & PRAGMA quick_check
+    NodeB->>NodeB: Transaktionaler Zeilen-Merge (LWW / Policy)
+    Note over NodeB: Eventual Consistency erreicht
+```
 
 ## Teil der ellmos-Stack-Familie
 
@@ -119,3 +145,7 @@ Ausfall einzelner Server über mehrere dauerhaft betriebene Knoten überstehen m
 - Pro Knoten darf ohne zusätzlichen Prozess-Lock nur ein Sync-Prozess gleichzeitig laufen.
 
 Die vollständige API- und Konfigurationsreferenz steht in [README.md](README.md).
+
+## Maschinenlesbarer Index
+
+Für KI-Agenten, LLMs und automatisierte Werkzeuge steht ein strukturierter Index unter [llms.txt](llms.txt) zur Verfügung.

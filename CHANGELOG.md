@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — 2026-07-25
 
-- Snapshot redaction now runs `VACUUM` after deleting excluded table rows, with a
-  regression test that checks secret bytes are not left in the published file.
+- Added root `llms.txt` for AI agent discovery, architecture context, and search index.
+- Enhanced `README.md` & `README_de.md` with Shields.io badges, language switcher, and Mermaid sequence diagrams.
+- Added `pythonpath = "."` to `[tool.pytest.ini_options]` in `pyproject.toml` for seamless test execution.
+- Expanded GitHub topics and metadata URLs for improved discoverability.
+
 
 ## 0.1.0 — 2026-07-11
 
