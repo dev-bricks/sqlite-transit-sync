@@ -2,7 +2,7 @@
 
 > Local-first SQLite synchronization through verified transit snapshots and configurable row-level merge policies. Extracted from the BACH ProSync architecture for standalone, zero-dependency Python projects.
 
-- Last-checked: 2026-07-25
+- Last-checked: 2026-07-26
 - Version: 0.1.0
 - Architecture: Local-First / Zero-Dependency / Snapshot-based Transit
 - Module Family: `dev-bricks/sync-master` companion (`sync.database`)

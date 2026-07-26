@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- **Dokumentation & Hygiene**: `llms.txt` Verifikations-Timestamp (2026-07-26) aktualisiert, Testsuite-Verifizierung durchgeführt (8/8 Pytest passed).
+
 ## 0.1.1 — 2026-07-25
 
 - Added root `llms.txt` for AI agent discovery, architecture context, and search index.
