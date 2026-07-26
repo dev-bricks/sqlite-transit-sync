@@ -17,6 +17,16 @@ Before deployment, define:
 5. transport authentication and retention;
 6. database migrations and rollback.
 
+Since 0.2.0 a second, independent guard runs before publication:
+`scan_snapshot_for_secrets` (default **on**) inspects snapshot *content* and aborts the push
+when a credential-shaped value is found, naming `table.column` but never the value. It exists
+because the table rule below can only drop tables you already anticipated, while credentials
+in practice end up pasted into free-text columns. It is a safety net, not a guarantee:
+patterns are vendor-prefixed, so a bespoke or unprefixed secret still passes. Treat a clean
+scan as "no known pattern matched", never as "this snapshot is free of secrets". Disable it
+only with `scan_snapshot_for_secrets = false`, and prefer `secret_scan_skip_tables` when a
+single table produces false positives.
+
 The default `snapshot_exclude_tables = ["secrets"]` is only a safety baseline. It
 cannot identify application-specific private or regulated data.
 

@@ -21,6 +21,36 @@ _SAFE_ID = re.compile(r"[^A-Za-z0-9._-]+")
 _DEFAULT_TIMESTAMP_COLUMNS = ("updated_at", "modified_at", "created_at")
 _DEFAULT_EXCLUDE_TABLES = ("secrets", "sqlite_sequence")
 
+# Credential patterns checked inside snapshot *content* before publication.
+#
+# Every pattern is anchored on a vendor prefix. That is deliberate: a generic
+# "long hexadecimal string" rule would flag checksums, UUIDs and content hashes,
+# which are legitimate and common in databases. A scanner that cries wolf gets
+# switched off, and a switched-off scanner protects nothing.
+#
+# `snapshot_exclude_tables` drops a *table* you already know about. This scan
+# answers the different question the table rule cannot: is there a credential
+# somewhere in free-text content — a note, a log line, a session summary?
+_DEFAULT_SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("openai", r"sk-(?!ant-|or-)[A-Za-z0-9_\-]{20,}"),
+    ("anthropic", r"sk-ant-[A-Za-z0-9_\-]{20,}"),
+    ("openrouter", r"sk-or-v1-[A-Za-z0-9]{20,}"),
+    ("github", r"gh[pousr]_[A-Za-z0-9]{16,}"),
+    ("gitlab", r"glpat-[A-Za-z0-9_\-]{16,}"),
+    ("google-api", r"AIza[0-9A-Za-z_\-]{30,}"),
+    ("google-oauth", r"ya29\.[A-Za-z0-9_\-]{20,}"),
+    ("slack", r"xox[baprs]-[A-Za-z0-9\-]{10,}"),
+    ("npm", r"npm_[A-Za-z0-9]{30,}"),
+    ("aws-access-key", r"\bAKIA[0-9A-Z]{16}\b"),
+    ("private-key-block", r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+)
+
+# Cheap SQL pre-filter: only rows containing one of these literals are pulled
+# into Python for the regex check. Keeps the scan usable on large snapshots.
+_SECRET_PREFILTER = (
+    "sk-", "gh", "glpat-", "AIza", "ya29.", "xox", "npm_", "AKIA", "-----BEGIN",
+)
+
 
 class SyncError(RuntimeError):
     """Raised when a snapshot or synchronization operation is unsafe."""
@@ -80,6 +110,9 @@ class SyncConfig:
     timestamp_columns: tuple[str, ...] = _DEFAULT_TIMESTAMP_COLUMNS
     exclude_tables: tuple[str, ...] = _DEFAULT_EXCLUDE_TABLES
     snapshot_exclude_tables: tuple[str, ...] = ("secrets",)
+    scan_snapshot_for_secrets: bool = True
+    secret_scan_extra_patterns: tuple[str, ...] = ()
+    secret_scan_skip_tables: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         self.database = Path(self.database).expanduser().resolve()
@@ -90,6 +123,8 @@ class SyncConfig:
         self.timestamp_columns = tuple(self.timestamp_columns)
         self.exclude_tables = tuple(self.exclude_tables)
         self.snapshot_exclude_tables = tuple(self.snapshot_exclude_tables)
+        self.secret_scan_extra_patterns = tuple(self.secret_scan_extra_patterns)
+        self.secret_scan_skip_tables = tuple(self.secret_scan_skip_tables)
         if self.database == self.transit or self.transit in self.database.parents:
             raise ValueError("The live database must not be inside the transit directory")
 
@@ -115,6 +150,9 @@ class SyncConfig:
             timestamp_columns=tuple(raw.get("timestamp_columns", _DEFAULT_TIMESTAMP_COLUMNS)),
             exclude_tables=tuple(raw.get("exclude_tables", _DEFAULT_EXCLUDE_TABLES)),
             snapshot_exclude_tables=tuple(raw.get("snapshot_exclude_tables", ("secrets",))),
+            scan_snapshot_for_secrets=bool(raw.get("scan_snapshot_for_secrets", True)),
+            secret_scan_extra_patterns=tuple(raw.get("secret_scan_extra_patterns", ())),
+            secret_scan_skip_tables=tuple(raw.get("secret_scan_skip_tables", ())),
         )
 
     def write(self, path: str | Path) -> Path:
@@ -128,6 +166,9 @@ class SyncConfig:
             "timestamp_columns": list(self.timestamp_columns),
             "exclude_tables": list(self.exclude_tables),
             "snapshot_exclude_tables": list(self.snapshot_exclude_tables),
+            "scan_snapshot_for_secrets": self.scan_snapshot_for_secrets,
+            "secret_scan_extra_patterns": list(self.secret_scan_extra_patterns),
+            "secret_scan_skip_tables": list(self.secret_scan_skip_tables),
         }
         _atomic_json_write(target, payload)
         return target
@@ -358,6 +399,69 @@ class TransitSync:
             connection.close()
         return redacted
 
+    def _scan_snapshot_for_secrets(self, path: Path) -> list[str]:
+        """Report credential-looking values in snapshot content.
+
+        Runs on the snapshot copy, never on the live database. Returns locations
+        as ``table.column`` — deliberately **without** the matched value, so the
+        credential is not copied into logs, exceptions or CI output.
+        """
+        if not self.config.scan_snapshot_for_secrets:
+            return []
+
+        patterns = [(name, re.compile(expr)) for name, expr in _DEFAULT_SECRET_PATTERNS]
+        patterns += [
+            (f"custom[{index}]", re.compile(expr))
+            for index, expr in enumerate(self.config.secret_scan_extra_patterns)
+        ]
+        skip = set(self.config.secret_scan_skip_tables)
+        findings: list[str] = []
+        connection = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            connection.text_factory = lambda value: value.decode("utf-8", "replace")
+            tables = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+                if not row[0].startswith("sqlite_") and row[0] not in skip
+            ]
+            for table in tables:
+                columns = [
+                    row[1]
+                    for row in connection.execute(
+                        f"PRAGMA table_info({_quote_identifier(table)})"
+                    ).fetchall()
+                    if (row[2] or "").upper() not in {"INTEGER", "REAL", "NUMERIC", "BOOLEAN"}
+                ]
+                for column in columns:
+                    quoted = _quote_identifier(column)
+                    # Cheap SQL pre-filter first; the regex only sees candidates.
+                    clause = " OR ".join(
+                        f"CAST({quoted} AS TEXT) LIKE ?" for _ in _SECRET_PREFILTER
+                    )
+                    params = [f"%{token}%" for token in _SECRET_PREFILTER]
+                    try:
+                        rows = connection.execute(
+                            f"SELECT CAST({quoted} AS TEXT) FROM {_quote_identifier(table)} "
+                            f"WHERE {clause}",
+                            params,
+                        ).fetchall()
+                    except sqlite3.Error:
+                        continue  # virtual tables / odd column types stay out of the way
+                    for (value,) in rows:
+                        if not value:
+                            continue
+                        for name, pattern in patterns:
+                            if pattern.search(value):
+                                location = f"{table}.{column} ({name})"
+                                if location not in findings:
+                                    findings.append(location)
+                                break
+        finally:
+            connection.close()
+        return findings
+
     @staticmethod
     def _quick_check(path: Path) -> None:
         connection: sqlite3.Connection | None = None
@@ -395,6 +499,15 @@ class TransitSync:
 
         try:
             redacted_tables = self._redact_snapshot(partial_path)
+            leaks = self._scan_snapshot_for_secrets(partial_path)
+            if leaks:
+                raise SyncError(
+                    "Snapshot publication aborted: credential-looking values remain in "
+                    + ", ".join(leaks)
+                    + ". Remove them from the source database, add the table to "
+                    "snapshot_exclude_tables, or disable scan_snapshot_for_secrets if "
+                    "this is a false positive. The value itself is not shown on purpose."
+                )
             self._quick_check(partial_path)
             digest = _sha256(partial_path)
             size = partial_path.stat().st_size

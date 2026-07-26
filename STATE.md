@@ -11,6 +11,7 @@
 - Primärschlüssel-basierter Timestamp-Merge
 - Schema-Drift über gemeinsame Spalten
 - Merge-Ausschlüsse und Snapshot-Redaktion
+- Credential-Scan des Snapshot-Inhalts vor Veröffentlichung (fail-closed, ADR-005)
 - eigenständige synthetische Tests
 
 ## Noch nicht integriert

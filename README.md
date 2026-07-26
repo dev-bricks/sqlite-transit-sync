@@ -63,6 +63,9 @@ application-selectable merge policies.
 - row-level last-write-wins per primary key for timestamped tables;
 - shared-column merge for basic schema drift tolerance;
 - configurable table exclusion and snapshot redaction with post-delete VACUUM;
+- a content-level credential scan that aborts publication when a snapshot still
+  contains credential-shaped values (on by default; reports `table.column`, never
+  the value itself);
 - custom `MergePolicy` support for domain rules, tombstones or CRDTs;
 - dependency-free Python API and JSON CLI.
 

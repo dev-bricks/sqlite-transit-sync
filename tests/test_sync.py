@@ -194,6 +194,68 @@ class TransitSyncTests(unittest.TestCase):
         self.assertEqual(1, report.updated)
         self.assertEqual("newer", item(self.b_db, "items", "shared")[1])
 
+    # -- credential scan -------------------------------------------------
+    # Test fixtures below build token-shaped strings by concatenation on purpose:
+    # a contiguous literal would be flagged by this repository's own secret gate
+    # and by third-party scanners cloning the project.
+
+    def _set_item_value(self, path: Path, value: str) -> None:
+        connection = sqlite3.connect(path)
+        try:
+            connection.execute("UPDATE items SET value = ? WHERE id = 'shared'", (value,))
+            connection.commit()
+        finally:
+            connection.close()
+
+    def test_secret_scan_blocks_publication_and_leaves_transit_clean(self) -> None:
+        self._set_item_value(self.a_db, "deploy note: use " + "ghp_" + "A" * 24)
+        with self.assertRaises(SyncError) as caught:
+            self.a.push()
+        message = str(caught.exception)
+        self.assertIn("items.value", message)
+        # The credential itself must never reach logs or exceptions.
+        self.assertNotIn("A" * 24, message)
+        # Nothing half-written may survive in the transit directory.
+        leftovers = list(self.transit.glob("*")) if self.transit.exists() else []
+        self.assertEqual([], leftovers)
+
+    def test_secret_scan_ignores_hashes_and_identifiers(self) -> None:
+        # Checksums, UUIDs and git SHAs are legitimate database content.
+        self._set_item_value(
+            self.a_db,
+            "sha256=" + "a1b2c3d4" * 8 + " uuid=123e4567-e89b-12d3-a456-426614174000",
+        )
+        snapshot = self.a.push()
+        self.assertTrue(snapshot.path.is_file())
+
+    def test_secret_scan_is_optional(self) -> None:
+        config = SyncConfig(
+            self.a_db,
+            self.transit,
+            self.root / "a-state.json",
+            "node-a",
+            "demo",
+            scan_snapshot_for_secrets=False,
+        )
+        self._set_item_value(self.a_db, "token " + "ghp_" + "B" * 24)
+        snapshot = TransitSync(config).push()
+        self.assertTrue(snapshot.path.is_file())
+
+    def test_secret_scan_survives_config_roundtrip(self) -> None:
+        config = SyncConfig(
+            self.a_db,
+            self.transit,
+            self.root / "a-state.json",
+            "node-a",
+            "demo",
+            scan_snapshot_for_secrets=False,
+            secret_scan_skip_tables=("items",),
+        )
+        target = config.write(self.root / "config.json")
+        restored = SyncConfig.from_file(target)
+        self.assertFalse(restored.scan_snapshot_for_secrets)
+        self.assertEqual(("items",), restored.secret_scan_skip_tables)
+
 
 if __name__ == "__main__":
     unittest.main()

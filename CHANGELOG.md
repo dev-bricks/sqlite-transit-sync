@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- **Credential scan before publication (`scan_snapshot_for_secrets`, default on).** Snapshots are
+  now checked for credential-shaped values in their *content* before they reach the transit
+  directory; a match aborts the push with a `SyncError` naming `table.column`, never the value.
+  Complements `snapshot_exclude_tables`, which can only drop a table you already know about —
+  the scan catches credentials pasted into free-text columns (notes, logs, session summaries).
+  Patterns are vendor-prefixed (OpenAI, Anthropic, OpenRouter, GitHub, GitLab, Google, Slack,
+  npm, AWS, PEM private-key blocks); checksums, UUIDs and git SHAs deliberately do **not** match.
+  New config keys: `scan_snapshot_for_secrets`, `secret_scan_extra_patterns`,
+  `secret_scan_skip_tables`. Rationale in `DECISIONS.md` (ADR-005).
+
 - **Dokumentation & Hygiene**: `llms.txt` Verifikations-Timestamp (2026-07-26) aktualisiert, Testsuite-Verifizierung durchgeführt (8/8 Pytest passed).
 
 ## 0.1.1 — 2026-07-25

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sqlite-transit-sync"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first SQLite synchronization through verified snapshots and configurable row-level merge policies."
 readme = "README.md"
 license = "MIT"

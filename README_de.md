@@ -141,6 +141,12 @@ Ausfall einzelner Server über mehrere dauerhaft betriebene Knoten überstehen m
 - Tabellen ohne Primärschlüssel oder passende Zeitstempelspalte werden übersprungen.
 - Snapshot-Redaktion löscht gelistete Tabellen und führt danach VACUUM aus; sensible
   Tabellen müssen trotzdem vollständig in `snapshot_exclude_tables` angegeben sein.
+- Der Credential-Scan (`scan_snapshot_for_secrets`, standardmäßig aktiv) prüft zusätzlich den
+  **Inhalt** des Snapshots und bricht die Veröffentlichung ab, wenn ein Zugangsdatum gefunden
+  wird — gemeldet wird `tabelle.spalte`, niemals der Wert. Er fängt genau das ab, was die
+  Tabellenregel nicht sehen kann: ein Passwort, das in einem Freitextfeld gelandet ist.
+  Die Muster sind herstellerpräfixiert; Prüfsummen, UUIDs und Git-SHAs lösen bewusst nicht aus.
+  Ein sauberer Scan bedeutet „kein bekanntes Muster gefunden", nicht „garantiert keine Geheimnisse".
 - Aufbewahrung, Migrationen und fachliche Konfliktregeln verantwortet die Anwendung.
 - Pro Knoten darf ohne zusätzlichen Prozess-Lock nur ein Sync-Prozess gleichzeitig laufen.
 
