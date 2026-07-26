@@ -10,7 +10,19 @@
   Patterns are vendor-prefixed (OpenAI, Anthropic, OpenRouter, GitHub, GitLab, Google, Slack,
   npm, AWS, PEM private-key blocks); checksums, UUIDs and git SHAs deliberately do **not** match.
   New config keys: `scan_snapshot_for_secrets`, `secret_scan_extra_patterns`,
-  `secret_scan_skip_tables`. Rationale in `DECISIONS.md` (ADR-005).
+  `secret_scan_skip_tables`, `secret_patterns_file`. Rationale in `DECISIONS.md` (ADR-005).
+- **Triggers are data, not code.** Patterns now live in
+  `sqlite_transit_sync/credential-triggers.json` and can be replaced via
+  `secret_patterns_file`, so detection can be tightened over time without a release.
+  Entries carry an optional `prefilter` literal for the SQL pre-filter; a pattern without
+  one falls back to a full column read rather than silently missing rows.
+- **Documented the escape hatch and the alternatives.** README (en/de) now lists every
+  config key with its default, states that disabling the scan is a legitimate choice when
+  you control the transit yourself, and points at real secret-distribution tools
+  (Vaultwarden, SOPS+age, pass, KeePassXC over Syncthing, Infisical/OpenBao, platform
+  keystores) so users stop trying to make a sync yard do that job.
+- Added `[tool.setuptools.package-data]` so the trigger file reaches installed wheels.
+- Version 0.2.0; `__version__` had drifted at 0.1.0 and now tracks `pyproject.toml`.
 
 - **Dokumentation & Hygiene**: `llms.txt` Verifikations-Timestamp (2026-07-26) aktualisiert, Testsuite-Verifizierung durchgeführt (8/8 Pytest passed).
 

@@ -6,7 +6,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from sqlite_transit_sync import SyncConfig, SyncError, TransitSync
+from sqlite_transit_sync import (
+    SyncConfig,
+    SyncError,
+    TransitSync,
+    load_secret_patterns,
+)
 
 
 SCHEMA = """
@@ -240,6 +245,60 @@ class TransitSyncTests(unittest.TestCase):
         self._set_item_value(self.a_db, "token " + "ghp_" + "B" * 24)
         snapshot = TransitSync(config).push()
         self.assertTrue(snapshot.path.is_file())
+
+    def test_bundled_trigger_file_is_present_and_loadable(self) -> None:
+        # Guards the packaging side: without package-data the JSON never reaches
+        # an installed wheel and every push would fail.
+        patterns = load_secret_patterns()
+        self.assertTrue(patterns)
+        self.assertTrue(all(p.name and p.regex for p in patterns))
+
+    def test_custom_trigger_file_replaces_defaults(self) -> None:
+        triggers = self.root / "my-triggers.json"
+        triggers.write_text(
+            json.dumps({"patterns": [{"name": "house", "regex": "ACME-[0-9]{4}", "prefilter": "ACME-"}]}),
+            encoding="utf-8",
+        )
+        config = SyncConfig(
+            self.a_db, self.transit, self.root / "a-state.json", "node-a", "demo",
+            secret_patterns_file=triggers,
+        )
+        sync = TransitSync(config)
+        # A GitHub-shaped token is no longer a trigger once defaults are replaced.
+        self._set_item_value(self.a_db, "token " + "ghp_" + "C" * 24)
+        self.assertTrue(sync.push().path.is_file())
+        # The house pattern is.
+        self._set_item_value(self.a_db, "internal ACME-1234")
+        with self.assertRaises(SyncError) as caught:
+            sync.push()
+        self.assertIn("house", str(caught.exception))
+
+    def test_pattern_without_prefilter_still_matches(self) -> None:
+        # A pattern with no literal makes the SQL pre-filter unsound; the scanner
+        # must fall back to reading the column instead of silently missing rows.
+        triggers = self.root / "no-prefilter.json"
+        triggers.write_text(
+            json.dumps({"patterns": [{"name": "loose", "regex": "[0-9]{3}-secret-[0-9]{3}"}]}),
+            encoding="utf-8",
+        )
+        config = SyncConfig(
+            self.a_db, self.transit, self.root / "a-state.json", "node-a", "demo",
+            secret_patterns_file=triggers,
+        )
+        self._set_item_value(self.a_db, "value 123-secret-456 inside")
+        with self.assertRaises(SyncError) as caught:
+            TransitSync(config).push()
+        self.assertIn("loose", str(caught.exception))
+
+    def test_broken_trigger_file_fails_loudly(self) -> None:
+        triggers = self.root / "broken.json"
+        triggers.write_text(json.dumps({"patterns": [{"name": "bad", "regex": "([unclosed"}]}), encoding="utf-8")
+        config = SyncConfig(
+            self.a_db, self.transit, self.root / "a-state.json", "node-a", "demo",
+            secret_patterns_file=triggers,
+        )
+        with self.assertRaises(SyncError):
+            TransitSync(config).push()
 
     def test_secret_scan_survives_config_roundtrip(self) -> None:
         config = SyncConfig(

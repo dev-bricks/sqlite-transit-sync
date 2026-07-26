@@ -29,6 +29,11 @@ sqlite-transit-sync = "sqlite_transit_sync.cli:main"
 where = ["."]
 include = ["sqlite_transit_sync*"]
 
+[tool.setuptools.package-data]
+# The credential triggers ship with the package: without this the scan would
+# raise on a pip-installed copy because the JSON never reaches the wheel.
+sqlite_transit_sync = ["credential-triggers.json"]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = "-ra -q"

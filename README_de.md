@@ -152,6 +152,49 @@ Ausfall einzelner Server über mehrere dauerhaft betriebene Knoten überstehen m
 
 Die vollständige API- und Konfigurationsreferenz steht in [README.md](README.md).
 
+## Konfiguration des Credential-Scans
+
+| Schlüssel | Standardwert | Bedeutung |
+|---|---|---|
+| `scan_snapshot_for_secrets` | `true` | Bricht die Veröffentlichung ab, wenn der Snapshot-Inhalt wie ein Zugangsdatum aussieht |
+| `secret_scan_skip_tables` | `[]` | Tabellen, die der Scan auslässt — besser als den Scan ganz abzuschalten |
+| `secret_scan_extra_patterns` | `[]` | Zusätzliche Regexe, ergänzend zur Trigger-Datei |
+| `secret_patterns_file` | `null` (mitgelieferte Datei) | Eigene Trigger-Datei; **ersetzt** die eingebauten Muster |
+| `snapshot_exclude_tables` | `["secrets"]` | Tabellen, deren Zeilen vor der Veröffentlichung aus dem Snapshot gelöscht werden |
+
+**Abschalten ist eine legitime Entscheidung**, kein Notbehelf. Wer den Transportordner
+selbst kontrolliert — eigener Server, EU-Standort im eigenen Vertrag, verschlüsselter
+USB-Datenträger — und Zugangsdaten bewusst mitführen will, setzt
+`"scan_snapshot_for_secrets": false`. Bei nur einer störenden Tabelle ist
+`secret_scan_skip_tables` die bessere Wahl: Der Scan bleibt überall sonst aktiv.
+
+**Trigger anpassen:** Die Muster liegen als Daten in
+`sqlite_transit_sync/credential-triggers.json`, nicht im Code — die Erkennung lässt sich
+also mit der Zeit schärfen, ohne auf ein Release zu warten. Jeder Eintrag hat `name`,
+`regex` und optional `prefilter` (ein Literal für den schnellen SQL-Vorfilter; es **muss**
+in jedem Treffer vorkommen, sonst werden Funde übersehen — fehlt es, liest der Scanner die
+Spalte vollständig).
+
+## Das hier ist kein Passwort-Manager
+
+Der Scan **entfernt** Zugangsdaten aus dem Sync-Weg. Er **verteilt** sie nicht. Wer das
+Problem „meine Rechner brauchen dieselben Passwörter" lösen will, ist hier falsch — und mit
+jedem Datei-Sync-Ordner ebenso. Passende Werkzeuge, die den Klartext von fremden Anbietern
+fernhalten:
+
+| Ansatz | Geeignet für | Hinweise |
+|---|---|---|
+| **Vaultwarden** (selbst gehostetes Bitwarden) | Menschen + CLI auf mehreren Rechnern | Läuft auf einem kleinen Dauerläufer; Zugriff über ein privates Netz (WireGuard, Tailscale) statt öffentlicher Freigabe. Offizielle Bitwarden-Clients, Browser-Erweiterungen und die `bw`-CLI funktionieren — Skripte und Agenten können Secrets also ebenfalls abrufen. |
+| **SOPS + age** | Secrets, die zum Code gehören | Verschlüsselte Dateien dürfen committet und in jeden Sync-Ordner gelegt werden, weil nur Chiffrat unterwegs ist. |
+| **`pass`** (GPG) + git | Unix-affine Einzelnutzer und kleine Teams | Eine Datei pro Secret, normales git-Remote, gar kein Server. |
+| **KeePassXC-Datei über Syncthing** | ohne Server, ohne Cloud-Konto | Peer-to-Peer-Abgleich; der Tresor bleibt eine einzelne verschlüsselte Datei. |
+| **Infisical / OpenBao (Vault-Fork)** | Teams, Maschinenidentitäten, Rotation | Echte Secret-Server mit Audit-Log und dynamischen Zugangsdaten — mehr Bewegteile, als ein Haushalt braucht. |
+| **Plattform-eigene Speicher** | ein Rechner, eine Anwendung | macOS-Schlüsselbund, Windows DPAPI/Anmeldeinformationsverwaltung, `systemd-creds`. Kein Abgleich, dafür keine Exponierung. |
+
+Entscheidend ist bei allen dieselbe Trennung: **ein Kanal für Daten, ein zweiter für
+Zugangsdaten.** Die Aufgabe dieses Moduls ist dann nur noch, dafür zu sorgen, dass der erste
+Kanal nicht stillschweigend zum zweiten wird — genau das erzwingt der Scan.
+
 ## Maschinenlesbarer Index
 
 Für KI-Agenten, LLMs und automatisierte Werkzeuge steht ein strukturierter Index unter [llms.txt](llms.txt) zur Verfügung.

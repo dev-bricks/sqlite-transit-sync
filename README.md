@@ -110,12 +110,101 @@ secrets, local tables or migrations belong to an application.
   "namespace": "my-app",
   "timestamp_columns": ["updated_at", "modified_at", "created_at"],
   "exclude_tables": ["secrets", "sqlite_sequence"],
-  "snapshot_exclude_tables": ["secrets"]
+  "snapshot_exclude_tables": ["secrets"],
+  "scan_snapshot_for_secrets": true,
+  "secret_scan_skip_tables": [],
+  "secret_scan_extra_patterns": [],
+  "secret_patterns_file": null
 }
 ```
 
 Relative paths are resolved from the config file. The live database must never
 be located inside the transit directory.
+
+### All keys and their defaults
+
+| Key | Default | Meaning |
+|---|---|---|
+| `database` | *(required)* | Live SQLite database owned by this node |
+| `transit` | *(required)* | Shared directory carrying snapshots and manifests |
+| `state` | `./.sync-state.json` | Per-node pull state; keep it out of the transit |
+| `node_id` | machine hostname | Identifies the publishing node in snapshot names |
+| `namespace` | `"default"` | Separates unrelated datasets in one transit |
+| `timestamp_columns` | `["updated_at","modified_at","created_at"]` | Columns consulted for last-write-wins |
+| `exclude_tables` | `["secrets","sqlite_sequence"]` | Tables never **merged** into the local database |
+| `snapshot_exclude_tables` | `["secrets"]` | Tables whose rows are **deleted from the snapshot** before publication (then `VACUUM`) |
+| `scan_snapshot_for_secrets` | `true` | Abort publication when snapshot content still looks like a credential |
+| `secret_scan_skip_tables` | `[]` | Tables the scan ignores — use for a single noisy table instead of disabling the scan |
+| `secret_scan_extra_patterns` | `[]` | Additional regexes, on top of the trigger file |
+| `secret_patterns_file` | `null` (bundled file) | Path to your own trigger file; **replaces** the built-in patterns |
+
+### The credential scan, and how to turn it off
+
+`snapshot_exclude_tables` can only drop a table you already anticipated. The scan
+answers the question that rule cannot: *did a credential end up pasted into a
+free-text column* — a note, a log line, a session summary? It runs on the snapshot
+copy after redaction and before publication. On a match it raises `SyncError`
+naming `table.column`; the matched value is never included, so the credential does
+not travel into logs, tracebacks or CI output. The partial snapshot is discarded,
+so nothing reaches the transit directory.
+
+**Turning it off is a legitimate choice**, not a workaround. If your transit is a
+storage location you control and trust — your own server, an EU-hosted volume under
+your contract, an encrypted removable drive — and you *want* credentials to travel
+with the data, then set:
+
+```json
+{ "scan_snapshot_for_secrets": false }
+```
+
+Prefer `secret_scan_skip_tables` when only one table produces false positives:
+keeping the scan on everywhere else is worth more than silencing it globally.
+
+### Tuning the triggers
+
+Patterns live in data, not code — `sqlite_transit_sync/credential-triggers.json` —
+so detection can be tightened over time without waiting for a release:
+
+```json
+{
+  "version": 1,
+  "patterns": [
+    { "name": "github", "regex": "gh[pousr]_[A-Za-z0-9]{16,}", "prefilter": "gh" },
+    { "name": "acme-internal", "regex": "ACME-[0-9]{4}", "prefilter": "ACME-" }
+  ]
+}
+```
+
+- `prefilter` is an optional literal used as a cheap SQL `LIKE` pre-filter so large
+  snapshots stay fast. It **must** appear in every value the regex can match,
+  otherwise findings are missed. Omit it when no such literal exists — the scanner
+  then reads the column in full for correctness.
+- Point `secret_patterns_file` at your own copy to replace the defaults entirely,
+  or use `secret_scan_extra_patterns` to add to them.
+
+Patterns are deliberately vendor-prefixed. A generic "long hexadecimal string" rule
+would flag checksums, UUIDs and git SHAs, which are legitimate database content — and
+a scanner with a high false-positive rate gets switched off, which protects nothing.
+
+## This is not a secrets manager
+
+The scan **removes** credentials from the sync path. It does not **distribute** them.
+If your actual problem is "my machines need the same passwords or API keys", this
+module is the wrong tool — and so is any document-sync folder. Pick one of these
+instead; all of them keep the plaintext away from a provider you do not control:
+
+| Approach | Good for | Notes |
+|---|---|---|
+| **Vaultwarden** (self-hosted Bitwarden) | humans + CLI on several machines | Runs on a small always-on box; reach it over a private network (WireGuard, Tailscale) instead of exposing it. Official Bitwarden clients, browser extensions and the `bw` CLI work against it, so scripts and agents can fetch secrets too. |
+| **SOPS + age** | secrets that belong next to code | Encrypted files are safe to commit and safe to put in any sync folder, because only ciphertext travels. Per-recipient keys, works well with git review. |
+| **`pass`** (GPG) + git | Unix-minded single users and small teams | One file per secret, ordinary git remote, no server at all. |
+| **KeePassXC database over Syncthing** | no server, no cloud account | Peer-to-peer file sync; the vault itself stays a single encrypted file. |
+| **Infisical / OpenBao (Vault fork)** | teams, machine identities, rotation | Real secret servers with audit logs and dynamic credentials — more moving parts than a household needs. |
+| **Platform-native stores** | one machine, one app | macOS Keychain, Windows DPAPI/Credential Manager, `systemd-creds`, or your CI's secret store. No sync, but no exposure either. |
+
+Whichever you choose, the split that matters is the same: **one channel for data,
+another for credentials.** Then this module's job is simply to make sure the first
+channel never quietly becomes the second — which is exactly what the scan enforces.
 
 ## Python API
 

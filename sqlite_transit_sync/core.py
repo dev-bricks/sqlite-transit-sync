@@ -21,35 +21,45 @@ _SAFE_ID = re.compile(r"[^A-Za-z0-9._-]+")
 _DEFAULT_TIMESTAMP_COLUMNS = ("updated_at", "modified_at", "created_at")
 _DEFAULT_EXCLUDE_TABLES = ("secrets", "sqlite_sequence")
 
-# Credential patterns checked inside snapshot *content* before publication.
-#
-# Every pattern is anchored on a vendor prefix. That is deliberate: a generic
-# "long hexadecimal string" rule would flag checksums, UUIDs and content hashes,
-# which are legitimate and common in databases. A scanner that cries wolf gets
-# switched off, and a switched-off scanner protects nothing.
+# Credential trigger patterns live in data, not in code, so detection can be
+# tightened over time without a release: see `credential-triggers.json` next to
+# this module and the `secret_patterns_file` config key.
 #
 # `snapshot_exclude_tables` drops a *table* you already know about. This scan
 # answers the different question the table rule cannot: is there a credential
 # somewhere in free-text content — a note, a log line, a session summary?
-_DEFAULT_SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("openai", r"sk-(?!ant-|or-)[A-Za-z0-9_\-]{20,}"),
-    ("anthropic", r"sk-ant-[A-Za-z0-9_\-]{20,}"),
-    ("openrouter", r"sk-or-v1-[A-Za-z0-9]{20,}"),
-    ("github", r"gh[pousr]_[A-Za-z0-9]{16,}"),
-    ("gitlab", r"glpat-[A-Za-z0-9_\-]{16,}"),
-    ("google-api", r"AIza[0-9A-Za-z_\-]{30,}"),
-    ("google-oauth", r"ya29\.[A-Za-z0-9_\-]{20,}"),
-    ("slack", r"xox[baprs]-[A-Za-z0-9\-]{10,}"),
-    ("npm", r"npm_[A-Za-z0-9]{30,}"),
-    ("aws-access-key", r"\bAKIA[0-9A-Z]{16}\b"),
-    ("private-key-block", r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-)
+_TRIGGER_FILE = Path(__file__).with_name("credential-triggers.json")
 
-# Cheap SQL pre-filter: only rows containing one of these literals are pulled
-# into Python for the regex check. Keeps the scan usable on large snapshots.
-_SECRET_PREFILTER = (
-    "sk-", "gh", "glpat-", "AIza", "ya29.", "xox", "npm_", "AKIA", "-----BEGIN",
-)
+
+@dataclass(frozen=True, slots=True)
+class SecretPattern:
+    """One credential trigger: label, matcher and optional SQL pre-filter."""
+
+    name: str
+    regex: "re.Pattern[str]"
+    prefilter: str | None = None
+
+
+def load_secret_patterns(path: str | Path | None = None) -> tuple[SecretPattern, ...]:
+    """Load credential triggers from JSON (defaults to the bundled file)."""
+    source = Path(path).expanduser() if path else _TRIGGER_FILE
+    try:
+        raw = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise SyncError(f"Invalid credential trigger file: {source}: {error}") from error
+    entries = raw.get("patterns", []) if isinstance(raw, dict) else raw
+    patterns: list[SecretPattern] = []
+    for index, entry in enumerate(entries):
+        try:
+            name = str(entry["name"])
+            compiled = re.compile(str(entry["regex"]))
+        except (KeyError, TypeError, re.error) as error:
+            raise SyncError(
+                f"Invalid credential trigger #{index} in {source}: {error}"
+            ) from error
+        prefilter = entry.get("prefilter") or None
+        patterns.append(SecretPattern(name, compiled, prefilter))
+    return tuple(patterns)
 
 
 class SyncError(RuntimeError):
@@ -113,6 +123,7 @@ class SyncConfig:
     scan_snapshot_for_secrets: bool = True
     secret_scan_extra_patterns: tuple[str, ...] = ()
     secret_scan_skip_tables: tuple[str, ...] = ()
+    secret_patterns_file: Path | None = None
 
     def __post_init__(self) -> None:
         self.database = Path(self.database).expanduser().resolve()
@@ -125,6 +136,8 @@ class SyncConfig:
         self.snapshot_exclude_tables = tuple(self.snapshot_exclude_tables)
         self.secret_scan_extra_patterns = tuple(self.secret_scan_extra_patterns)
         self.secret_scan_skip_tables = tuple(self.secret_scan_skip_tables)
+        if self.secret_patterns_file is not None:
+            self.secret_patterns_file = Path(self.secret_patterns_file).expanduser().resolve()
         if self.database == self.transit or self.transit in self.database.parents:
             raise ValueError("The live database must not be inside the transit directory")
 
@@ -153,6 +166,11 @@ class SyncConfig:
             scan_snapshot_for_secrets=bool(raw.get("scan_snapshot_for_secrets", True)),
             secret_scan_extra_patterns=tuple(raw.get("secret_scan_extra_patterns", ())),
             secret_scan_skip_tables=tuple(raw.get("secret_scan_skip_tables", ())),
+            secret_patterns_file=(
+                resolve(raw["secret_patterns_file"])
+                if raw.get("secret_patterns_file")
+                else None
+            ),
         )
 
     def write(self, path: str | Path) -> Path:
@@ -169,6 +187,9 @@ class SyncConfig:
             "scan_snapshot_for_secrets": self.scan_snapshot_for_secrets,
             "secret_scan_extra_patterns": list(self.secret_scan_extra_patterns),
             "secret_scan_skip_tables": list(self.secret_scan_skip_tables),
+            "secret_patterns_file": (
+                str(self.secret_patterns_file) if self.secret_patterns_file else None
+            ),
         }
         _atomic_json_write(target, payload)
         return target
@@ -409,11 +430,21 @@ class TransitSync:
         if not self.config.scan_snapshot_for_secrets:
             return []
 
-        patterns = [(name, re.compile(expr)) for name, expr in _DEFAULT_SECRET_PATTERNS]
-        patterns += [
-            (f"custom[{index}]", re.compile(expr))
-            for index, expr in enumerate(self.config.secret_scan_extra_patterns)
-        ]
+        patterns = list(load_secret_patterns(self.config.secret_patterns_file))
+        for index, expr in enumerate(self.config.secret_scan_extra_patterns):
+            try:
+                patterns.append(SecretPattern(f"custom[{index}]", re.compile(expr)))
+            except re.error as error:
+                raise SyncError(f"Invalid secret_scan_extra_patterns[{index}]: {error}") from error
+        if not patterns:
+            return []
+
+        # Rows are pre-filtered in SQL when every pattern carries a literal that
+        # must be present. A single pattern without one makes the pre-filter
+        # unsound — missing a credential is worse than a slower scan — so the
+        # column is then read in full.
+        prefilters = [p.prefilter for p in patterns]
+        can_prefilter = all(prefilters)
         skip = set(self.config.secret_scan_skip_tables)
         findings: list[str] = []
         connection = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
@@ -436,25 +467,24 @@ class TransitSync:
                 ]
                 for column in columns:
                     quoted = _quote_identifier(column)
-                    # Cheap SQL pre-filter first; the regex only sees candidates.
-                    clause = " OR ".join(
-                        f"CAST({quoted} AS TEXT) LIKE ?" for _ in _SECRET_PREFILTER
+                    select = (
+                        f"SELECT CAST({quoted} AS TEXT) FROM {_quote_identifier(table)}"
                     )
-                    params = [f"%{token}%" for token in _SECRET_PREFILTER]
+                    params: list[str] = []
+                    if can_prefilter:
+                        clause = " OR ".join(f"CAST({quoted} AS TEXT) LIKE ?" for _ in prefilters)
+                        select = f"{select} WHERE {clause}"
+                        params = [f"%{token}%" for token in prefilters]
                     try:
-                        rows = connection.execute(
-                            f"SELECT CAST({quoted} AS TEXT) FROM {_quote_identifier(table)} "
-                            f"WHERE {clause}",
-                            params,
-                        ).fetchall()
+                        rows = connection.execute(select, params).fetchall()
                     except sqlite3.Error:
                         continue  # virtual tables / odd column types stay out of the way
                     for (value,) in rows:
                         if not value:
                             continue
-                        for name, pattern in patterns:
-                            if pattern.search(value):
-                                location = f"{table}.{column} ({name})"
+                        for pattern in patterns:
+                            if pattern.regex.search(value):
+                                location = f"{table}.{column} ({pattern.name})"
                                 if location not in findings:
                                     findings.append(location)
                                 break
