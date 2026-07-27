@@ -24,6 +24,7 @@
 - Added `[tool.setuptools.package-data]` so the trigger file reaches installed wheels.
 - Version 0.2.0; `__version__` had drifted at 0.1.0 and now tracks `pyproject.toml`.
 
+- **Dokumentation, SEO & Hygiene**: `llms.txt` Verifikations-Timestamp auf 2026-07-27 aktualisiert, Shields.io Badges in `README.md` & `README_de.md` auf 16/16 grüne Pytest-Tests angehoben, 100% grün verifiziert [G 2026-07-27].
 - **Dokumentation & Hygiene**: `llms.txt` Verifikations-Timestamp (2026-07-26) aktualisiert, Testsuite-Verifizierung durchgeführt (8/8 Pytest passed).
 
 ## 0.1.1 — 2026-07-25
