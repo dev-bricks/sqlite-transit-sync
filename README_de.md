@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/github/license/dev-bricks/sqlite-transit-sync)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python->=3.10-blue.svg)](https://www.python.org/)
 [![Architecture](https://img.shields.io/badge/architecture-local--first-success.svg)](#teil-der-ellmos-stack-familie)
-[![Tests](https://img.shields.io/badge/tests-16%2F16%20passed-brightgreen.svg)](#kurzstart)
+[![Tests](https://img.shields.io/badge/tests-19%2F19%20passed-brightgreen.svg)](#kurzstart)
 [![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
 
 `sqlite-transit-sync` gleicht unabhängige lokale SQLite-Datenbanken über geprüfte

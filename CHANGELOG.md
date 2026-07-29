@@ -1,7 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## 0.2.0 — 2026-07-29
 
+- **CI/CD & Automation**: Added `.github/workflows/ci.yml` for automated GitHub Actions testing on Python 3.10, 3.11, 3.12, 3.13.
+- **Tests & Metadata**: Added `tests/test_metadata.py` checking version parity, exports, and `llms.txt` integrity (19/19 passed).
+- **Dokumentation & Hygiene**: `llms.txt` Last-checked Datum auf 2026-07-29 und Version auf 0.2.0 angeglichen, Badges in `README.md` & `README_de.md` auf 19/19 grüne Pytest-Tests aktualisiert [G 2026-07-29].
 - **Credential scan before publication (`scan_snapshot_for_secrets`, default on).** Snapshots are
   now checked for credential-shaped values in their *content* before they reach the transit
   directory; a match aborts the push with a `SyncError` naming `table.column`, never the value.
