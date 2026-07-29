@@ -8,6 +8,9 @@
 [![Tests](https://img.shields.io/badge/tests-19%2F19%20passed-brightgreen.svg)](#tests)
 [![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
 
+> [!NOTE]
+> **LLM & AI Agent Context**: A structured machine-readable sitemap, architectural overview, and API guide is available at [`llms.txt`](llms.txt).
+
 Local-first synchronization for independent SQLite databases through verified
 snapshots and application-selectable merge policies. It is extracted from the
 BACH ProSync architecture without BACH, OneDrive, host-name, or user-path

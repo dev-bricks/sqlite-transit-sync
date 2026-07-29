@@ -8,6 +8,9 @@
 [![Tests](https://img.shields.io/badge/tests-19%2F19%20passed-brightgreen.svg)](#kurzstart)
 [![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
 
+> [!NOTE]
+> **KI- & Agenten-Kontext**: Ein maschinenlesbarer Verzeichnisbaum, Systemarchitektur-Metadaten und API-Guide sind unter [`llms.txt`](llms.txt) verfügbar.
+
 `sqlite-transit-sync` gleicht unabhängige lokale SQLite-Datenbanken über geprüfte
 Snapshots und anpassbare Merge-Regeln ab. Das Modul wurde aus der
 BACH-ProSync-Architektur extrahiert und enthält keine BACH-, OneDrive-, Rechner-
