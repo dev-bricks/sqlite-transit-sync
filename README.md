@@ -315,6 +315,24 @@ across several permanently operated nodes.
 See [ARCHITECTURE.md](ARCHITECTURE.md), [README_de.md](README_de.md) and
 [SECURITY.md](SECURITY.md).
 
+<!-- BEGIN GENERATED ELLMOS BUNDLE DISCOVERY -->
+
+## Bundles and partners
+
+Generated discovery projection for `module:sqlite-transit-sync` from `catalog:v4-bundles` (`a52688938bcad21469beb546acfe6dd79ca40196a2bbaf246e5bd6aaac4bbbd7`).
+Target repository visibility: `public`. Bundle manifests remain the membership authority; this section does not install or activate components.
+Discovery approval: `public` module-registry record, explicit default-deny bundle allowlist.
+
+### `ellmos-sync-federation-bundle`
+
+- Bundle recipe visibility: `private`; role: `declared-component`; requirement: `recommended`.
+- module partners: `module:cloud-safe-exporter`, `module:receipt-validator`, `module:sync`, `module:system-explorer-export`, `module:system-gap-master`.
+- skill partners: `skill:agent-config-sync`, `skill:mcp-config-sync`, `skill:system-onboarding`.
+
+Composition and runtime details are intentionally omitted.
+
+<!-- END GENERATED ELLMOS BUNDLE DISCOVERY -->
+
 ## Machine-Readable Index
 
 For AI agents, LLMs, and automated tools, a structured sitemap and API index is available at [llms.txt](llms.txt).
