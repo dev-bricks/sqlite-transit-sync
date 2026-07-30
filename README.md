@@ -1,5 +1,8 @@
 # sqlite-transit-sync
 
+<img src="assets/banner.png" width="100%" alt="Sqlite Transit Sync banner">
+
+
 [English](README.md) | [Deutsch](README_de.md)
 
 [![License](https://img.shields.io/github/license/dev-bricks/sqlite-transit-sync)](LICENSE)
