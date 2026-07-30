@@ -162,6 +162,11 @@ config_sha256 = hashlib.sha256(payload).hexdigest()
 | `secret_scan_extra_patterns` | `[]` | Additional regexes, on top of the trigger file |
 | `secret_patterns_file` | `null` (bundled file) | Path to your own trigger file; **replaces** the built-in patterns |
 
+The `state` default in this table applies when a JSON configuration is loaded
+without that key. `sqlite-transit-sync init` instead writes
+`.<config-stem>-state.json` when `--state` is omitted (for `node.json`:
+`.node-state.json`).
+
 ### The credential scan, and how to turn it off
 
 `snapshot_exclude_tables` can only drop a table you already anticipated. The scan
@@ -209,6 +214,8 @@ so detection can be tightened over time without waiting for a release:
 Patterns are deliberately vendor-prefixed. A generic "long hexadecimal string" rule
 would flag checksums, UUIDs and git SHAs, which are legitimate database content — and
 a scanner with a high false-positive rate gets switched off, which protects nothing.
+Treat a clean scan as "no known pattern matched", never as "this snapshot is free of
+secrets".
 
 ## This is not a secrets manager
 

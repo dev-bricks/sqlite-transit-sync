@@ -1,132 +1,303 @@
 # sqlite-transit-sync
 
+<img src="assets/banner.png" width="100%" alt="Sqlite Transit Sync banner">
+
+
 [English](README.md) | [Deutsch](README_de.md)
 
 [![License](https://img.shields.io/github/license/dev-bricks/sqlite-transit-sync)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python->=3.10-blue.svg)](https://www.python.org/)
 [![Architecture](https://img.shields.io/badge/architecture-local--first-success.svg)](#teil-der-ellmos-stack-familie)
-[![Tests](https://img.shields.io/badge/tests-26%2F26%20passed-brightgreen.svg)](#kurzstart)
+[![Tests](https://img.shields.io/badge/tests-26%2F26%20passed-brightgreen.svg)](#tests)
 [![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
 
 > [!NOTE]
-> **KI- & Agenten-Kontext**: Ein maschinenlesbarer Verzeichnisbaum, Systemarchitektur-Metadaten und API-Guide sind unter [`llms.txt`](llms.txt) verfügbar.
+> **Kontext für LLMs und KI-Agenten**: Ein strukturierter maschinenlesbarer Verzeichnisbaum, ein Architekturüberblick und ein API-Leitfaden stehen unter [`llms.txt`](llms.txt) bereit.
 
-`sqlite-transit-sync` gleicht unabhängige lokale SQLite-Datenbanken über geprüfte
-Snapshots und anpassbare Merge-Regeln ab. Das Modul wurde aus der
-BACH-ProSync-Architektur extrahiert und enthält keine BACH-, OneDrive-, Rechner-
-oder Benutzerpfade.
+Local-first-Synchronisierung für unabhängige SQLite-Datenbanken über geprüfte
+Snapshots und von der Anwendung wählbare Merge-Policies. Das Modul wurde aus der
+BACH-ProSync-Architektur extrahiert und enthält keine Abhängigkeiten von BACH,
+OneDrive, Rechnernamen oder Benutzerpfaden.
 
-Es ist **kein verteilter SQL-Server**: Jeder Knoten öffnet ausschließlich seine
-lokale Datenbank. Ein gemeinsamer Transportordner trägt geschlossene Snapshots
-mit Manifesten. Beim Pull werden Integrität und Prüfsumme kontrolliert und die
-Daten anschließend in einer lokalen Transaktion zusammengeführt.
+Dies ist **kein verteilter SQL-Server**. Jeder Knoten besitzt und öffnet nur seine
+lokale Datenbank. Ein gemeinsamer Ordner, ein eingebundener Object Store, ein
+Wechseldatenträger oder ein anderer Dateitransport überträgt geschlossene Snapshots
+mit Manifesten. Beim Pull wird ein Snapshot geprüft und innerhalb einer Transaktion
+in die lokale Datenbank zusammengeführt.
 
-Passt gut zu [sync-master](https://github.com/dev-bricks/sync-master)
-(gleiche Modul-Familie): Ein sync-master-Yard ist ein natürlicher
-Transit-Transport — `--transit` auf eine tool-eigene Zone
-`db-transit/<namespace>/` im Yard zeigen lassen (dort Protokoll-Regel R9).
-sync-master trägt die Dokumente, dieses Modul verantwortet
-Datenbank-Integrität und Merge; beide bleiben unabhängig.
+Passt gut zu [sync-master](https://github.com/dev-bricks/sync-master) aus derselben
+Modulfamilie: Ein sync-master-Yard ist ein natürlicher Transit-Transport. Dazu wird
+`--transit` auf eine werkzeugeigene Zone `db-transit/<namespace>/` im Yard gesetzt
+(dort Protokollregel R9). sync-master transportiert die Dokumente, dieses Modul
+verantwortet Datenbankintegrität und Merge; beide bleiben unabhängig.
 
 ## Architektur & Datenfluss
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant NodeA as Knoten A (app.db)
+    participant NodeA as Node A (app.db)
     participant Transit as Shared Transit (db-transit)
-    participant NodeB as Knoten B (app.db)
+    participant NodeB as Node B (app.db)
 
-    Note over NodeA: Lokale Schreibzugriffe
-    NodeA->>NodeA: SQLite Backup API (Online-Snapshot)
-    NodeA->>Transit: Atomarer Push: Snapshot & SHA-256 Manifest
-    Note over Transit: Geprüfte Transit-Zone (R9)
-    NodeB->>Transit: Manifest-Prüfung & PRAGMA quick_check
-    NodeB->>NodeB: Transaktionaler Zeilen-Merge (LWW / Policy)
-    Note over NodeB: Eventual Consistency erreicht
+    Note over NodeA: Live local writes
+    NodeA->>NodeA: SQLite Backup API (Online Snapshot)
+    NodeA->>Transit: Push atomic snapshot & SHA-256 manifest
+    Note over Transit: Verified Transit Storage (R9)
+    NodeB->>Transit: Read manifest & PRAGMA quick_check
+    NodeB->>NodeB: Transactional Row Merge (LWW / Policy)
+    Note over NodeB: Eventual Consistency Reached
 ```
 
 ## Teil der ellmos-Stack-Familie
 
 `sqlite-transit-sync` ist ein Companion-Modul zu
-[dev-bricks/sync-master](https://github.com/dev-bricks/sync-master) aus
-derselben Modul-Familie: sync-master verantwortet den Dateitransport
-(`sync.files`), dieses Modul die Datenbank-Integrität und den Merge
-(`sync.database`). Beide sind eigenständig nutzbar oder in Stacks der
-[ellmos-ai](https://github.com/ellmos-ai)-Familie kombinierbar — siehe den
-Stack-Katalog [ellmos-ai/stacks](https://github.com/ellmos-ai/stacks). Seine
-Baukasten-Rolle: kein Live-SQLite über Datei-Sync — nur geprüfte Snapshots
-mit anwendungsspezifischen Merge-Policies.
+[dev-bricks/sync-master](https://github.com/dev-bricks/sync-master) aus derselben
+Modulfamilie: sync-master verantwortet den Dateitransport (`sync.files`), dieses
+Modul die Datenbankintegrität und den Merge (`sync.database`). Beide sind
+eigenständig oder als Teil von Stacks aus der
+[ellmos-ai](https://github.com/ellmos-ai)-Familie nutzbar; siehe den
+[ellmos-ai/stacks](https://github.com/ellmos-ai/stacks)-Katalog. Seine Rolle in
+diesem Baukasten: kein Live-SQLite über Dateisynchronisierung, sondern ausschließlich
+geprüfte Snapshots mit von der Anwendung wählbaren Merge-Policies.
 
 ## Eigenschaften
 
-- konsistente Snapshots über die SQLite-Backup-API;
-- atomare Veröffentlichung und SHA-256-Manifest;
-- geschlossene Snapshots im Rollback-Journal-Modus und fail-closed Bereinigung
-  aller temporären SQLite-Sidecars vor der Veröffentlichung;
-- `PRAGMA quick_check` vor Verarbeitung;
-- lokaler Pull-Zustand je Quellknoten und idempotente Wiederholung;
-- Last-Write-Wins pro Primärschlüssel für Tabellen mit Zeitstempel;
-- Toleranz für Schema-Drift durch gemeinsame Spalten;
-- konfigurierbare Ausschlüsse und Entfernung sensibler Tabelleninhalte aus Snapshots
-  mit anschließendem VACUUM;
-- eigene Merge-Policy für Tombstones, CRDTs oder fachliche Konfliktregeln;
+- konsistente Online-Snapshots über die SQLite-Backup-API;
+- atomare Veröffentlichung über eine temporäre Datei und `os.replace`;
+- geschlossene Snapshots im Rollback-Journal-Modus mit Fail-closed-Bereinigung aller
+  temporären SQLite-Sidecars vor der Veröffentlichung;
+- SHA-256-Manifest und Prüfung mit `PRAGMA quick_check`;
+- lokaler Pull-Zustand je Knoten und idempotente Wiederholung;
+- zeilenweises Last-write-wins pro Primärschlüssel für Tabellen mit Zeitstempel;
+- Merge gemeinsamer Spalten für grundlegende Toleranz gegenüber Schema-Drift;
+- konfigurierbare Tabellenausschlüsse und Snapshot-Redaktion mit anschließendem
+  `VACUUM`;
+- inhaltsbezogener Credential-Scan, der die Veröffentlichung abbricht, wenn ein
+  Snapshot weiterhin zugangsdatenähnliche Werte enthält (standardmäßig aktiv;
+  gemeldet wird `table.column`, niemals der Wert selbst);
+- eigene `MergePolicy` für fachliche Regeln, Tombstones oder CRDTs;
 - Python-API und JSON-CLI ohne zusätzliche Laufzeitabhängigkeiten.
+
+## Installation
+
+```bash
+python -m pip install -e .
+```
 
 ## Kurzstart
 
-```powershell
-python -m pip install -e .
-sqlite-transit-sync init --config node.json --database app.db `
-  --transit shared-transit --node-id laptop --namespace meine-app
+Auf jedem Knoten wird eine Konfiguration angelegt. Jeder Knoten verwendet seine
+eigene Datenbank und Zustandsdatei, aber dasselbe Transit-Verzeichnis und denselben
+Namespace.
+
+```bash
+sqlite-transit-sync init \
+  --config node.json \
+  --database ./app.db \
+  --transit ./shared-transit \
+  --node-id laptop \
+  --namespace my-app
+
 sqlite-transit-sync push --config node.json
 sqlite-transit-sync pull --config node.json --dry-run
 sqlite-transit-sync pull --config node.json
+sqlite-transit-sync status --config node.json
 sqlite-transit-sync verify --config node.json
 ```
 
 Das Anwendungsschema muss auf jedem Knoten bereits existieren. Ein automatisches
-Erstkopieren ist absichtlich deaktiviert, weil nur die Anwendung entscheiden kann,
-welche Migrationen, lokalen Tabellen und Geheimnisse zulässig sind.
+Erstkopieren ist absichtlich deaktiviert, weil ein generisches Modul nicht
+entscheiden kann, welches Schema, welche Secrets, lokalen Tabellen oder Migrationen
+zu einer Anwendung gehören.
+
+## Konfiguration
+
+```json
+{
+  "database": "./app.db",
+  "transit": "./shared-transit",
+  "state": "./node-state.json",
+  "node_id": "laptop",
+  "namespace": "my-app",
+  "timestamp_columns": ["updated_at", "modified_at", "created_at"],
+  "exclude_tables": ["secrets", "sqlite_sequence"],
+  "snapshot_exclude_tables": ["secrets"],
+  "scan_snapshot_for_secrets": true,
+  "secret_scan_skip_tables": [],
+  "secret_scan_extra_patterns": [],
+  "secret_patterns_file": null
+}
+```
+
+Relative Pfade werden vom Speicherort der Konfigurationsdatei aus aufgelöst. Die
+aktive Datenbank darf niemals innerhalb des Transit-Verzeichnisses liegen.
+
+Anwendungen, die einen Audit-Hash für genau die eingelesene Konfiguration benötigen,
+können die Bytes einmal lesen und mit demselben quellrelativen Parser verwenden,
+ohne die Datei ein zweites Mal einzulesen:
+
+```python
+import hashlib
+from pathlib import Path
+
+from sqlite_transit_sync import SyncConfig
+
+config_path = Path("node.json").resolve()
+payload = config_path.read_bytes()
+config = SyncConfig.from_bytes(payload, source_path=config_path)
+config_sha256 = hashlib.sha256(payload).hexdigest()
+```
+
+### Alle Schlüssel und ihre Standardwerte
+
+| Schlüssel | Standardwert | Bedeutung |
+|---|---|---|
+| `database` | *(erforderlich)* | Aktive SQLite-Datenbank dieses Knotens |
+| `transit` | *(erforderlich)* | Gemeinsames Verzeichnis für Snapshots und Manifeste |
+| `state` | `./.sync-state.json` | Pull-Zustand dieses Knotens; außerhalb des Transits aufbewahren |
+| `node_id` | Rechnername | Identifiziert den veröffentlichenden Knoten in Snapshot-Namen |
+| `namespace` | `"default"` | Trennt unabhängige Datensätze innerhalb eines Transits |
+| `timestamp_columns` | `["updated_at","modified_at","created_at"]` | Für Last-write-wins geprüfte Spalten |
+| `exclude_tables` | `["secrets","sqlite_sequence"]` | Tabellen, die niemals in die lokale Datenbank **gemergt** werden |
+| `snapshot_exclude_tables` | `["secrets"]` | Tabellen, deren Zeilen vor der Veröffentlichung aus dem Snapshot **gelöscht** werden, gefolgt von `VACUUM` |
+| `scan_snapshot_for_secrets` | `true` | Bricht die Veröffentlichung ab, wenn der Snapshot-Inhalt weiterhin wie Zugangsdaten aussieht |
+| `secret_scan_skip_tables` | `[]` | Tabellen, die der Scan auslässt; bei einer einzelnen störenden Tabelle besser als die vollständige Abschaltung |
+| `secret_scan_extra_patterns` | `[]` | Zusätzliche reguläre Ausdrücke, ergänzend zur Trigger-Datei |
+| `secret_patterns_file` | `null` (mitgelieferte Datei) | Pfad zu einer eigenen Trigger-Datei; **ersetzt** die eingebauten Muster |
+
+Der `state`-Standardwert in dieser Tabelle gilt, wenn eine JSON-Konfiguration ohne
+diesen Schlüssel geladen wird. `sqlite-transit-sync init` schreibt ohne `--state`
+stattdessen `.<config-stem>-state.json` (für `node.json`: `.node-state.json`).
+
+### Der Credential-Scan und wie man ihn abschaltet
+
+`snapshot_exclude_tables` kann nur Tabellen entfernen, die bereits bekannt sind.
+Der Scan beantwortet die darüber hinausgehende Frage: *Sind Zugangsdaten in einer
+Freitextspalte gelandet* – etwa in einer Notiz, Logzeile oder Sitzungszusammenfassung?
+Er läuft nach der Redaktion und vor der Veröffentlichung auf der Snapshot-Kopie.
+Bei einem Treffer löst er einen `SyncError` mit `table.column` aus; der gefundene
+Wert wird niemals ausgegeben und gelangt daher nicht in Logs, Tracebacks oder
+CI-Ausgaben. Der unvollständige Snapshot wird verworfen, sodass nichts das
+Transit-Verzeichnis erreicht.
+
+**Das Abschalten ist eine legitime Entscheidung**, kein Notbehelf. Wer den
+Transport selbst kontrolliert und ihm vertraut – eigener Server, EU-gehostetes
+Volume unter eigenem Vertrag oder verschlüsselter Wechseldatenträger – und
+Zugangsdaten bewusst mit den Daten transportieren möchte, setzt:
+
+```json
+{ "scan_snapshot_for_secrets": false }
+```
+
+Wenn nur eine Tabelle Fehlalarme erzeugt, sollte `secret_scan_skip_tables` verwendet
+werden. Der Schutz bleibt dann für alle anderen Tabellen aktiv.
+
+### Trigger anpassen
+
+Die Muster liegen als Daten statt im Code unter
+`sqlite_transit_sync/credential-triggers.json`. Dadurch lässt sich die Erkennung
+verschärfen, ohne auf ein Release zu warten:
+
+```json
+{
+  "version": 1,
+  "patterns": [
+    { "name": "github", "regex": "gh[pousr]_[A-Za-z0-9]{16,}", "prefilter": "gh" },
+    { "name": "acme-internal", "regex": "ACME-[0-9]{4}", "prefilter": "ACME-" }
+  ]
+}
+```
+
+- `prefilter` ist ein optionales Literal für einen schnellen SQL-`LIKE`-Vorfilter,
+  damit große Snapshots schnell bleiben. Es **muss** in jedem Wert vorkommen, auf
+  den der reguläre Ausdruck passt; andernfalls werden Funde übersehen. Fehlt ein
+  solches Literal, wird die gesamte Spalte gelesen, damit die Prüfung korrekt bleibt.
+- Mit `secret_patterns_file` ersetzt eine eigene Datei die Standardmuster
+  vollständig; `secret_scan_extra_patterns` ergänzt sie.
+
+Die Muster sind bewusst herstellerpräfixiert. Eine allgemeine Regel für „lange
+hexadezimale Zeichenfolgen“ würde Prüfsummen, UUIDs und Git-SHAs erfassen, obwohl
+diese legitime Datenbankinhalte sind. Ein Scanner mit vielen Fehlalarmen wird
+abgeschaltet und schützt dann gar nicht mehr. Ein sauberer Scan bedeutet „kein
+bekanntes Muster gefunden“, niemals „dieser Snapshot enthält garantiert keine
+Secrets“.
+
+## Das hier ist kein Passwort-Manager
+
+Der Scan **entfernt** Zugangsdaten aus dem Synchronisierungsweg. Er **verteilt** sie
+nicht. Wenn das eigentliche Problem lautet „meine Rechner benötigen dieselben
+Passwörter oder API-Schlüssel“, ist dieses Modul das falsche Werkzeug – ebenso wie
+jeder Dokumenten-Synchronisierungsordner. Stattdessen sollte einer der folgenden
+Ansätze verwendet werden; alle halten Klartext von einem nicht selbst
+kontrollierten Anbieter fern:
+
+| Ansatz | Geeignet für | Hinweise |
+|---|---|---|
+| **Vaultwarden** (selbst gehostetes Bitwarden) | Menschen und CLI auf mehreren Rechnern | Läuft auf einem kleinen ständig aktiven Rechner; Zugriff über ein privates Netz wie WireGuard oder Tailscale statt über eine öffentliche Freigabe. Offizielle Bitwarden-Clients, Browser-Erweiterungen und die `bw`-CLI funktionieren damit, sodass auch Skripte und Agenten Secrets abrufen können. |
+| **SOPS + age** | Secrets neben dem Code | Verschlüsselte Dateien können sicher committet oder in beliebige Synchronisierungsordner gelegt werden, weil nur Chiffrat übertragen wird. Unterstützt Schlüssel je Empfänger und eignet sich gut für Git-Reviews. |
+| **`pass`** (GPG) + Git | Unix-orientierte Einzelnutzer und kleine Teams | Eine Datei pro Secret, normales Git-Remote, kein Server erforderlich. |
+| **KeePassXC-Datenbank über Syncthing** | kein Server, kein Cloud-Konto | Peer-to-Peer-Dateisynchronisierung; der Tresor bleibt eine einzelne verschlüsselte Datei. |
+| **Infisical / OpenBao (Vault-Fork)** | Teams, Maschinenidentitäten und Rotation | Echte Secret-Server mit Audit-Logs und dynamischen Zugangsdaten; mehr bewegliche Teile, als ein Haushalt benötigt. |
+| **Plattformeigene Speicher** | ein Rechner, eine Anwendung | macOS-Schlüsselbund, Windows DPAPI/Anmeldeinformationsverwaltung, `systemd-creds` oder der Secret-Store der CI. Kein Abgleich, aber auch keine Offenlegung. |
+
+Unabhängig von der Wahl bleibt dieselbe Trennung entscheidend: **ein Kanal für
+Daten, ein anderer für Zugangsdaten.** Die Aufgabe dieses Moduls besteht darin,
+sicherzustellen, dass der erste Kanal nicht unbemerkt zum zweiten wird – genau das
+erzwingt der Scan.
+
+## Python-API
+
+```python
+from sqlite_transit_sync import SyncConfig, TransitSync
+
+sync = TransitSync(SyncConfig.from_file("node.json"))
+snapshot = sync.push()
+reports = sync.pull()
+print(snapshot.sha256, [report.as_dict() for report in reports])
+```
+
+Wenn Timestamp-LWW nicht ausreicht, kann `TransitSync` ein Objekt erhalten, das
+`MergePolicy.merge(local, remote, snapshot)` implementiert.
 
 ## Vergleich mit Distributed SQL
 
 | Aspekt | `sqlite-transit-sync` | Distributed SQL, zum Beispiel CockroachDB oder YugabyteDB |
 |---|---|---|
 | Grundmodell | Jeder Knoten besitzt eine unabhängige lokale SQLite-Datenbank | Alle Server bilden gemeinsam eine logische SQL-Datenbank |
-| Schreibzugriff | Zunächst lokal, anschließend synchronisiert | Direkt durch den Cluster koordiniert |
-| Synchronisierung | Zeitversetzter Snapshot-Pull mit Zeilen-Merge | Laufende Replikation zwischen Clusterknoten |
+| Schreibzugriff | Zunächst lokal, später synchronisiert | Direkt durch den Cluster koordiniert |
+| Synchronisierung | Asynchroner Snapshot-Pull mit Zeilen-Merge | Laufende Replikation zwischen Clusterknoten |
 | Konsistenz | Eventual Consistency nach erfolgreichem Austausch | Üblicherweise starke oder serialisierbare Konsistenz |
 | Konsens und Quorum | Nicht erforderlich | Meist Raft-basierter Mehrheitskonsens |
-| Globale Transaktionen | Nein | Ja, auch über mehrere Knoten oder Datenbereiche |
+| Globale Transaktionen | Nein | Ja, auch über mehrere Knoten oder Shards |
 | Konfliktbehandlung | Anwendungsspezifische `MergePolicy`; standardmäßig Timestamp-LWW | Transaktionen, MVCC, Sperren und Konsens |
-| Offline-Betrieb | Jeder Knoten kann unabhängig weiterarbeiten | Schreibzugriffe benötigen normalerweise ein erreichbares Quorum |
-| Netzwerkausfall | Lokale Arbeit läuft weiter; der Abgleich wartet | Minderheitsknoten können ihre Schreibfähigkeit verlieren |
-| Ausfallsicherheit | Lokale DBs bleiben nutzbar; Transit und Backups brauchen eigene Absicherung | Replikation und automatisches Failover bei vorhandenem Quorum |
-| Sichtbarkeit | Änderungen werden nach Push und Pull gemeinsam sichtbar | Bestätigte Änderungen gelten unmittelbar im Cluster |
-| Schemaänderungen | Die Anwendung migriert jede lokale Datenbank kontrolliert | Clusterweit koordinierte SQL-Migrationen |
-| Löschungen | Benötigen Tombstones oder eine eigene Policy | Normale transaktionale SQL-Löschung |
-| Infrastruktur | Python, SQLite und ein konfigurierbarer Dateitransport | Mehrere dauerhafte DB-Server, TLS, Monitoring und Backups |
-| Ständig aktive Server | Keine Mindestzahl; ein Knoten genügt | Für Fehlertoleranz üblicherweise mindestens drei |
-| Wichtigster Vorteil | Offline-Fähigkeit, niedriger Aufwand und fachliche Merge-Regeln | Starke Konsistenz, parallele Writer und Hochverfügbarkeit |
-| Wichtigster Nachteil | Keine globale ACID-Transaktion oder sofortige gemeinsame Wahrheit | Deutlich höherer Betriebs- und Ressourcenaufwand |
+| Offline-Betrieb | Ein Knoten kann unabhängig weiter lesen und schreiben | Schreibzugriffe benötigen normalerweise ein erreichbares Quorum |
+| Netzwerkausfall | Lokale Arbeit läuft weiter; die Synchronisierung wartet | Minderheitspartitionen können ihre Schreibfähigkeit verlieren |
+| Ausfallsicherheit | Lokale Datenbanken bleiben nutzbar; Transit und Backups benötigen eigene Absicherung | Replikation und automatisches Failover, solange ein Quorum verfügbar ist |
+| Sichtbarkeit | Änderungen werden nach Push und Pull gemeinsam sichtbar | Bestätigte Änderungen sind im Cluster unmittelbar autoritativ |
+| Schemaänderungen | Die Anwendung migriert jede lokale Datenbank | Clusterweite SQL-Migrationen |
+| Löschungen | Benötigen Tombstones oder eine eigene Policy | Normale transaktionale SQL-Löschungen |
+| Infrastruktur | Python, SQLite und ein konfigurierbarer Dateitransport | Mehrere dauerhafte Datenbankserver, TLS, Monitoring und Backups |
+| Mindestzahl ständig aktiver Server | Keine; ein Knoten genügt | Für Fehlertoleranz üblicherweise mindestens drei |
+| Wichtigster Vorteil | Offline-first-Einfachheit, niedrige Kosten und fachliche Merge-Regeln | Starke Konsistenz, parallele Writer und Hochverfügbarkeit |
+| Wichtigste Grenze | Keine globale ACID-Transaktion oder sofortige gemeinsame Wahrheit | Deutlich höherer Betriebs- und Ressourcenaufwand |
 
 ### Vorteile, Nachteile und typische Use Cases
 
 | System | Vorteile | Nachteile | Geeignete Use Cases | Ungeeignete Use Cases |
 |---|---|---|---|---|
-| `sqlite-transit-sync` | Sehr geringer Ressourcenbedarf; offlinefähig; kein zentraler Server; lokale Datenhaltung; freier Transportweg; fachlich anpassbare Konfliktregeln | Änderungen werden verzögert sichtbar; Konflikte, Löschungen, Zeitstempel und Migrationen bleiben Anwendungsverantwortung; keine globalen ACID-Transaktionen und kein Quorum-Failover | Persönliche Wissens- und Taskdatenbanken; lokale KI-Agenten; Laptop–Workstation–Server-Abgleich; Außen- und Edge-Anwendungen; Desktop-Software mit optionalem Sync; Forschungsnotizen | Zahlungen, knappe Lagerbestände, Sitzplatzreservierungen, Echtzeit-Kollaboration am selben Datensatz oder viele konkurrierende Writer |
-| Distributed SQL | Gemeinsame verbindliche Datenbank; starke Konsistenz; globale Transaktionen; koordinierte parallele Writes; automatische Replikation und Failover; horizontale Skalierung | Dauerhafte Server, Netzwerk, Zertifikate, Monitoring und Upgrades erforderlich; Quorum kann bei Partitionen Writes blockieren; höhere Latenz und Kosten | Finanz- und Buchungssysteme; SaaS-Plattformen; E-Commerce-Bestand; globale Benutzerkonten; Multiplayer-Backends; hochverfügbare Unternehmensdienste | Kleine persönliche Tools, zeitweise getrennte Geräte, Einzelbenutzer-Desktop-Anwendungen oder bereits zuverlässig durch lokale SQLite-DBs abgedeckte Workloads |
+| `sqlite-transit-sync` | Sehr geringer Ressourcenbedarf; offlinefähig; kein zentraler Server; lokale Datenhaltung; transportunabhängig; Merge-Regeln können der Fachdomäne folgen | Änderungen werden verzögert sichtbar; Konflikte, Löschungen, Zeitregeln und Migrationen bleiben Anwendungsverantwortung; keine globalen ACID-Transaktionen und kein Quorum-Failover | Persönliche Wissens- und Taskdatenbanken; lokale KI-Agenten; Laptop-, Workstation- und Serveraustausch; Außen- und Edge-Anwendungen; Desktop-Software mit optionaler Synchronisierung; Forschungsnotizen | Zahlungen, knappe Lagerbestände, Sitzplatzreservierungen, Echtzeit-Zusammenarbeit am selben Datensatz oder viele konkurrierende Writer |
+| Distributed SQL | Gemeinsame autoritative Datenbank; starke Konsistenz; globale Transaktionen; koordinierte parallele Schreibzugriffe; automatische Replikation und Failover; horizontale Skalierung | Dauerhafte Server, Netzwerk, Zertifikate, Monitoring und Upgrades erforderlich; Quorum kann bei Partitionen Schreibzugriffe blockieren; höhere Latenz und Kosten | Finanz- und Buchungssysteme; SaaS-Plattformen; E-Commerce-Bestand; globale Benutzerkonten; Multiplayer-Backends; hochverfügbare Unternehmensdienste | Kleine persönliche Werkzeuge, zeitweise getrennte Geräte, Einzelbenutzer-Desktop-Anwendungen oder bereits zuverlässig durch lokale SQLite-Datenbanken abgedeckte Workloads |
 
 ### Schnelle Entscheidungshilfe
 
-| Anforderung | Passender Ansatz |
+| Anforderung | Bevorzugter Ansatz |
 |---|---|
-| Geräte müssen offline weiterarbeiten | `sqlite-transit-sync` |
-| Änderungen dürfen erst nach einem Sync gemeinsam sichtbar werden | `sqlite-transit-sync` |
+| Knoten müssen offline weiterarbeiten | `sqlite-transit-sync` |
+| Änderungen dürfen erst nach einem Synchronisierungsschritt sichtbar werden | `sqlite-transit-sync` |
 | Daten sollen lokal bleiben und Konflikte sind selten | `sqlite-transit-sync` |
 | Viele Clients verändern dieselben Datensätze gleichzeitig | Distributed SQL |
-| Jeder Commit muss sofort global verbindlich sein | Distributed SQL |
+| Jeder Commit muss sofort global autoritativ sein | Distributed SQL |
 | Globale Transaktionen oder automatisches Cluster-Failover sind Pflicht | Distributed SQL |
 
 Für wenige zeitweise verbundene persönliche oder Edge-Geräte ist
@@ -135,74 +306,43 @@ Writer entstehen, ist häufig eine zentrale PostgreSQL-Instanz der nächste sinn
 Schritt. Distributed SQL wird interessant, wenn starke Konsistenz zusätzlich den
 Ausfall einzelner Server über mehrere dauerhaft betriebene Knoten überstehen muss.
 
-## Wichtige Grenzen
+## Sicherheit und Grenzen
 
-- Aktive Datenbanken bleiben immer lokal und liegen niemals im Transportordner.
-- Vor der Veröffentlichung wird jeder Snapshot geschlossen in den
-  Rollback-Journal-Modus überführt; WAL-, SHM-, Journal- und sonstige
-  unverzeichnete SQLite-Sidecars bleiben nicht im Transport zurück.
+- Eine aktive SQLite-Datenbank niemals aus einem Netzwerk- oder
+  Cloud-Synchronisierungsordner öffnen.
 - SHA-256 erkennt Beschädigung, authentifiziert aber keinen feindlichen Transport.
-- Die Standardregel synchronisiert keine Löschungen und setzt vergleichbare
-  Zeitstempel voraus.
-- Gleiche Zeitstempel konvergieren über einen deterministischen Inhaltsvergleich;
-  fachliche Konfliktregeln kann dieser technische Fallback nicht ersetzen.
-- Tabellen ohne Primärschlüssel oder passende Zeitstempelspalte werden übersprungen.
-- Snapshot-Redaktion löscht gelistete Tabellen und führt danach VACUUM aus; sensible
-  Tabellen müssen trotzdem vollständig in `snapshot_exclude_tables` angegeben sein.
-- Der Credential-Scan (`scan_snapshot_for_secrets`, standardmäßig aktiv) prüft zusätzlich den
-  **Inhalt** des Snapshots und bricht die Veröffentlichung ab, wenn ein Zugangsdatum gefunden
-  wird — gemeldet wird `tabelle.spalte`, niemals der Wert. Er fängt genau das ab, was die
-  Tabellenregel nicht sehen kann: ein Passwort, das in einem Freitextfeld gelandet ist.
-  Die Muster sind herstellerpräfixiert; Prüfsummen, UUIDs und Git-SHAs lösen bewusst nicht aus.
-  Ein sauberer Scan bedeutet „kein bekanntes Muster gefunden", nicht „garantiert keine Geheimnisse".
-- Aufbewahrung, Migrationen und fachliche Konfliktregeln verantwortet die Anwendung.
-- Pro Knoten darf ohne zusätzlichen Prozess-Lock nur ein Sync-Prozess gleichzeitig laufen.
+- Das standardmäßige LWW setzt vergleichbare Zeitstempel voraus und leitet keine
+  Löschungen ab.
+- Gleiche Zeitstempel konvergieren über einen deterministischen Inhaltsvergleich.
+  Dieser technische Fallback ersetzt keine fachlichen Konfliktregeln.
+- Tabellen ohne Primärschlüssel oder Zeitstempelspalte werden übersprungen.
+- Snapshot-Redaktion löscht gelistete Tabellen und führt anschließend `VACUUM` aus.
+  Trotzdem muss jede Tabelle mit Zugangsdaten oder privaten Daten gelistet werden;
+  das generische Modul kann fachliche Secrets nicht zuverlässig erkennen.
+- Anwendungsmigrationen, Clock Policy, Aufbewahrung und Konfliktsemantik bleiben bei
+  der integrierenden Anwendung.
+- Pro Knoten darf ohne zusätzlichen Prozess-Lock der Host-Anwendung nur ein
+  Synchronisierungsprozess laufen.
 
-Die vollständige API- und Konfigurationsreferenz steht in [README.md](README.md).
-
-## Konfiguration des Credential-Scans
-
-| Schlüssel | Standardwert | Bedeutung |
-|---|---|---|
-| `scan_snapshot_for_secrets` | `true` | Bricht die Veröffentlichung ab, wenn der Snapshot-Inhalt wie ein Zugangsdatum aussieht |
-| `secret_scan_skip_tables` | `[]` | Tabellen, die der Scan auslässt — besser als den Scan ganz abzuschalten |
-| `secret_scan_extra_patterns` | `[]` | Zusätzliche Regexe, ergänzend zur Trigger-Datei |
-| `secret_patterns_file` | `null` (mitgelieferte Datei) | Eigene Trigger-Datei; **ersetzt** die eingebauten Muster |
-| `snapshot_exclude_tables` | `["secrets"]` | Tabellen, deren Zeilen vor der Veröffentlichung aus dem Snapshot gelöscht werden |
-
-**Abschalten ist eine legitime Entscheidung**, kein Notbehelf. Wer den Transportordner
-selbst kontrolliert — eigener Server, EU-Standort im eigenen Vertrag, verschlüsselter
-USB-Datenträger — und Zugangsdaten bewusst mitführen will, setzt
-`"scan_snapshot_for_secrets": false`. Bei nur einer störenden Tabelle ist
-`secret_scan_skip_tables` die bessere Wahl: Der Scan bleibt überall sonst aktiv.
-
-**Trigger anpassen:** Die Muster liegen als Daten in
-`sqlite_transit_sync/credential-triggers.json`, nicht im Code — die Erkennung lässt sich
-also mit der Zeit schärfen, ohne auf ein Release zu warten. Jeder Eintrag hat `name`,
-`regex` und optional `prefilter` (ein Literal für den schnellen SQL-Vorfilter; es **muss**
-in jedem Treffer vorkommen, sonst werden Funde übersehen — fehlt es, liest der Scanner die
-Spalte vollständig).
-
-## Das hier ist kein Passwort-Manager
-
-Der Scan **entfernt** Zugangsdaten aus dem Sync-Weg. Er **verteilt** sie nicht. Wer das
-Problem „meine Rechner brauchen dieselben Passwörter" lösen will, ist hier falsch — und mit
-jedem Datei-Sync-Ordner ebenso. Passende Werkzeuge, die den Klartext von fremden Anbietern
-fernhalten:
-
-| Ansatz | Geeignet für | Hinweise |
-|---|---|---|
-| **Vaultwarden** (selbst gehostetes Bitwarden) | Menschen + CLI auf mehreren Rechnern | Läuft auf einem kleinen Dauerläufer; Zugriff über ein privates Netz (WireGuard, Tailscale) statt öffentlicher Freigabe. Offizielle Bitwarden-Clients, Browser-Erweiterungen und die `bw`-CLI funktionieren — Skripte und Agenten können Secrets also ebenfalls abrufen. |
-| **SOPS + age** | Secrets, die zum Code gehören | Verschlüsselte Dateien dürfen committet und in jeden Sync-Ordner gelegt werden, weil nur Chiffrat unterwegs ist. |
-| **`pass`** (GPG) + git | Unix-affine Einzelnutzer und kleine Teams | Eine Datei pro Secret, normales git-Remote, gar kein Server. |
-| **KeePassXC-Datei über Syncthing** | ohne Server, ohne Cloud-Konto | Peer-to-Peer-Abgleich; der Tresor bleibt eine einzelne verschlüsselte Datei. |
-| **Infisical / OpenBao (Vault-Fork)** | Teams, Maschinenidentitäten, Rotation | Echte Secret-Server mit Audit-Log und dynamischen Zugangsdaten — mehr Bewegteile, als ein Haushalt braucht. |
-| **Plattform-eigene Speicher** | ein Rechner, eine Anwendung | macOS-Schlüsselbund, Windows DPAPI/Anmeldeinformationsverwaltung, `systemd-creds`. Kein Abgleich, dafür keine Exponierung. |
-
-Entscheidend ist bei allen dieselbe Trennung: **ein Kanal für Daten, ein zweiter für
-Zugangsdaten.** Die Aufgabe dieses Moduls ist dann nur noch, dafür zu sorgen, dass der erste
-Kanal nicht stillschweigend zum zweiten wird — genau das erzwingt der Scan.
+Siehe [ARCHITECTURE.md](ARCHITECTURE.md), [README.md](README.md) und
+[SECURITY.md](SECURITY.md).
 
 ## Maschinenlesbarer Index
 
-Für KI-Agenten, LLMs und automatisierte Werkzeuge steht ein strukturierter Index unter [llms.txt](llms.txt) zur Verfügung.
+Für KI-Agenten, LLMs und automatisierte Werkzeuge steht unter [llms.txt](llms.txt)
+ein strukturierter Verzeichnisbaum mit API-Index bereit.
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+## Herkunft
+
+Das Modul wurde 2026 aus BACH `system/hub/db_sync.py` (ProSync) extrahiert. Die
+eigenständige Fassung ersetzt BACH-spezifische Pfade, Handler, Secrets und
+Tabellenannahmen durch Konfigurations- und Policy-Schnittstellen. Sie führt den
+Merge außerdem je Primärschlüssel aus und ergänzt geprüfte Manifeste.
+
+MIT – siehe [LICENSE](LICENSE).
