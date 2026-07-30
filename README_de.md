@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/github/license/dev-bricks/sqlite-transit-sync)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python->=3.10-blue.svg)](https://www.python.org/)
 [![Architecture](https://img.shields.io/badge/architecture-local--first-success.svg)](#teil-der-ellmos-stack-familie)
-[![Tests](https://img.shields.io/badge/tests-19%2F19%20passed-brightgreen.svg)](#kurzstart)
+[![Tests](https://img.shields.io/badge/tests-26%2F26%20passed-brightgreen.svg)](#kurzstart)
 [![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
 
 > [!NOTE]
@@ -62,6 +62,8 @@ mit anwendungsspezifischen Merge-Policies.
 
 - konsistente Snapshots über die SQLite-Backup-API;
 - atomare Veröffentlichung und SHA-256-Manifest;
+- geschlossene Snapshots im Rollback-Journal-Modus und fail-closed Bereinigung
+  aller temporären SQLite-Sidecars vor der Veröffentlichung;
 - `PRAGMA quick_check` vor Verarbeitung;
 - lokaler Pull-Zustand je Quellknoten und idempotente Wiederholung;
 - Last-Write-Wins pro Primärschlüssel für Tabellen mit Zeitstempel;
@@ -136,6 +138,9 @@ Ausfall einzelner Server über mehrere dauerhaft betriebene Knoten überstehen m
 ## Wichtige Grenzen
 
 - Aktive Datenbanken bleiben immer lokal und liegen niemals im Transportordner.
+- Vor der Veröffentlichung wird jeder Snapshot geschlossen in den
+  Rollback-Journal-Modus überführt; WAL-, SHM-, Journal- und sonstige
+  unverzeichnete SQLite-Sidecars bleiben nicht im Transport zurück.
 - SHA-256 erkennt Beschädigung, authentifiziert aber keinen feindlichen Transport.
 - Die Standardregel synchronisiert keine Löschungen und setzt vergleichbare
   Zeitstempel voraus.

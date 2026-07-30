@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/github/license/dev-bricks/sqlite-transit-sync)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python->=3.10-blue.svg)](https://www.python.org/)
 [![Architecture](https://img.shields.io/badge/architecture-local--first-success.svg)](#part-of-the-ellmos-stack-family)
-[![Tests](https://img.shields.io/badge/tests-19%2F19%20passed-brightgreen.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-26%2F26%20passed-brightgreen.svg)](#tests)
 [![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
 
 > [!NOTE]
@@ -64,6 +64,8 @@ application-selectable merge policies.
 
 - consistent online snapshots through SQLite's backup API;
 - atomic publication using a temporary file and `os.replace`;
+- closed, rollback-journal snapshots with fail-closed cleanup of every temporary
+  SQLite sidecar before publication;
 - SHA-256 manifest and `PRAGMA quick_check` verification;
 - per-node local pull state and idempotent replay;
 - row-level last-write-wins per primary key for timestamped tables;
@@ -126,6 +128,22 @@ secrets, local tables or migrations belong to an application.
 
 Relative paths are resolved from the config file. The live database must never
 be located inside the transit directory.
+
+Applications that need an audit hash for exactly the parsed configuration can
+read the bytes once and use the same source-relative parser without a second
+file read:
+
+```python
+import hashlib
+from pathlib import Path
+
+from sqlite_transit_sync import SyncConfig
+
+config_path = Path("node.json").resolve()
+payload = config_path.read_bytes()
+config = SyncConfig.from_bytes(payload, source_path=config_path)
+config_sha256 = hashlib.sha256(payload).hexdigest()
+```
 
 ### All keys and their defaults
 
