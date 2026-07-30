@@ -9,11 +9,12 @@
 
 ## System Overview
 
-`sqlite-transit-sync` is a Python 3.10+ zero-dependency library and CLI for synchronizing local SQLite databases across untrusted or asynchronous file transports (shared folders, object-store mounts, removable drives, or sync-master yards). Verified 19/19 passing test suite on 2026-07-30.
+`sqlite-transit-sync` is a Python 3.10+ zero-dependency library and CLI for synchronizing local SQLite databases across untrusted or asynchronous file transports (shared folders, object-store mounts, removable drives, or sync-master yards). Verified 26/26 passing test suite on 2026-07-30.
 
 It avoids live SQLite database locking over file sync by using:
 1. Online consistent snapshots via SQLite Backup API (`sqlite3.Connection.backup`).
-2. Atomic snapshot publication using temporary files and `os.replace`.
+2. Closed rollback-journal snapshots with fail-closed temporary sidecar cleanup,
+   followed by atomic publication using `os.replace`.
 3. Pre-merge integrity checks via `PRAGMA quick_check` and SHA-256 manifest verification.
 4. Deterministic, transactional row-level merge policies (Last-Write-Wins per PK for timestamped tables, shared-column merge for schema drift).
 

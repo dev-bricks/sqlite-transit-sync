@@ -108,6 +108,43 @@ def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
             pass
 
 
+def _sqlite_artifact_paths(path: Path) -> tuple[Path, ...]:
+    sidecars = tuple(sorted(path.parent.glob(f"{path.name}-*")))
+    return (path, *sidecars)
+
+
+def _remove_sqlite_artifacts(path: Path) -> None:
+    failures: list[tuple[Path, OSError]] = []
+    for candidate in _sqlite_artifact_paths(path):
+        try:
+            candidate.unlink(missing_ok=True)
+        except OSError as error:
+            failures.append((candidate, error))
+    if failures:
+        details = "; ".join(f"{candidate}: {error}" for candidate, error in failures)
+        raise SyncError(f"Could not clean temporary SQLite artifacts: {details}")
+
+
+def _assert_no_sqlite_sidecars(path: Path) -> None:
+    leftovers = _sqlite_artifact_paths(path)[1:]
+    if leftovers:
+        names = ", ".join(candidate.name for candidate in leftovers)
+        raise SyncError(f"Unclosed SQLite snapshot has sidecars: {names}")
+
+
+def _remove_manifest_artifacts(path: Path) -> None:
+    candidates = (path, *sorted(path.parent.glob(f".{path.name}.*.tmp")))
+    failures: list[tuple[Path, OSError]] = []
+    for candidate in candidates:
+        try:
+            candidate.unlink(missing_ok=True)
+        except OSError as error:
+            failures.append((candidate, error))
+    if failures:
+        details = "; ".join(f"{candidate}: {error}" for candidate, error in failures)
+        raise SyncError(f"Could not clean snapshot manifest artifacts: {details}")
+
+
 @dataclass(slots=True)
 class SyncConfig:
     """Portable configuration for one node participating in a transit."""
@@ -144,7 +181,13 @@ class SyncConfig:
     @classmethod
     def from_file(cls, path: str | Path) -> "SyncConfig":
         config_path = Path(path).expanduser().resolve()
-        raw = json.loads(config_path.read_text(encoding="utf-8"))
+        return cls.from_bytes(config_path.read_bytes(), source_path=config_path)
+
+    @classmethod
+    def from_bytes(cls, payload: bytes, *, source_path: str | Path) -> "SyncConfig":
+        """Parse exact config bytes using paths relative to their source file."""
+        config_path = Path(source_path).expanduser().resolve()
+        raw = json.loads(payload.decode("utf-8"))
         base = config_path.parent
 
         def resolve(value: str) -> Path:
@@ -420,6 +463,21 @@ class TransitSync:
             connection.close()
         return redacted
 
+    @staticmethod
+    def _close_snapshot(path: Path) -> None:
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(str(path))
+            result = connection.execute("PRAGMA journal_mode=DELETE").fetchone()
+        except sqlite3.Error as error:
+            raise SyncError(f"Could not close SQLite snapshot {path}: {error}") from error
+        finally:
+            if connection is not None:
+                connection.close()
+        if not result or str(result[0]).lower() != "delete":
+            raise SyncError(f"Could not switch SQLite snapshot to DELETE journal mode: {path}")
+        _assert_no_sqlite_sidecars(path)
+
     def _scan_snapshot_for_secrets(self, path: Path) -> list[str]:
         """Report credential-looking values in snapshot content.
 
@@ -513,21 +571,30 @@ class TransitSync:
         final_path = self.config.transit / self._snapshot_name(created_at)
         partial_path = final_path.with_name(f".{final_path.name}.partial")
         manifest_path = final_path.with_suffix(final_path.suffix + ".json")
-        partial_path.unlink(missing_ok=True)
+        _remove_sqlite_artifacts(partial_path)
         source: sqlite3.Connection | None = None
         destination: sqlite3.Connection | None = None
         try:
-            source = sqlite3.connect(str(self.config.database))
-            destination = sqlite3.connect(str(partial_path))
-            with destination:
-                source.backup(destination)
-        finally:
-            if destination is not None:
-                destination.close()
-            if source is not None:
-                source.close()
+            try:
+                source = sqlite3.connect(str(self.config.database))
+                destination = sqlite3.connect(str(partial_path))
+                with destination:
+                    source.backup(destination)
+            finally:
+                if destination is not None:
+                    destination.close()
+                if source is not None:
+                    source.close()
+        except Exception as error:
+            try:
+                _remove_sqlite_artifacts(partial_path)
+            except SyncError as cleanup_error:
+                raise cleanup_error from error
+            raise
 
+        published_snapshot = False
         try:
+            self._close_snapshot(partial_path)
             redacted_tables = self._redact_snapshot(partial_path)
             leaks = self._scan_snapshot_for_secrets(partial_path)
             if leaks:
@@ -539,11 +606,19 @@ class TransitSync:
                     "this is a false positive. The value itself is not shown on purpose."
                 )
             self._quick_check(partial_path)
+            _assert_no_sqlite_sidecars(partial_path)
             digest = _sha256(partial_path)
             size = partial_path.stat().st_size
             os.replace(partial_path, final_path)
-        except Exception:
-            partial_path.unlink(missing_ok=True)
+            published_snapshot = True
+            _assert_no_sqlite_sidecars(final_path)
+        except Exception as error:
+            try:
+                _remove_sqlite_artifacts(partial_path)
+                if published_snapshot:
+                    _remove_sqlite_artifacts(final_path)
+            except SyncError as cleanup_error:
+                raise cleanup_error from error
             raise
         manifest = {
             "protocol": PROTOCOL_VERSION,
@@ -557,8 +632,13 @@ class TransitSync:
         }
         try:
             _atomic_json_write(manifest_path, manifest)
-        except Exception:
-            final_path.unlink(missing_ok=True)
+        except Exception as error:
+            try:
+                _remove_manifest_artifacts(manifest_path)
+                _remove_sqlite_artifacts(final_path)
+                _remove_sqlite_artifacts(partial_path)
+            except SyncError as cleanup_error:
+                raise cleanup_error from error
             raise
         return Snapshot(
             path=final_path,

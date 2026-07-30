@@ -9,8 +9,10 @@ local DB A --SQLite backup--> snapshot + manifest --transport--> local staging/r
      +----------------------- local transaction <--------------- local DB B
 ```
 
-Only snapshots cross node boundaries. A live database, WAL or SHM file is never
-opened through the transport.
+Only snapshots cross node boundaries. Before publication, every backup is
+switched to SQLite's `DELETE` journal mode and checked for adjacent sidecars.
+A live database, WAL, SHM, rollback-journal or other unmanifested SQLite file is
+never opened through or left in the transport.
 
 ## Components
 

@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from sqlite_transit_sync import (
     SyncConfig,
@@ -50,6 +51,10 @@ def item(path: Path, table: str, key: str) -> tuple | None:
         return connection.execute(f"SELECT * FROM [{table}] WHERE id = ?", (key,)).fetchone()
     finally:
         connection.close()
+
+
+def transit_files(path: Path) -> list[str]:
+    return sorted(item.name for item in path.iterdir()) if path.exists() else []
 
 
 class TransitSyncTests(unittest.TestCase):
@@ -149,6 +154,145 @@ class TransitSyncTests(unittest.TestCase):
         self.assertEqual("sample-app", config.namespace)
         self.assertEqual((self.root / "a.db").resolve(), config.database)
         self.assertEqual((config_path.parent / "state.json").resolve(), config.state)
+
+    def test_config_from_bytes_uses_the_same_source_relative_semantics(self) -> None:
+        config_path = self.root / "config" / "node.json"
+        payload = json.dumps(
+            {
+                "database": "../a.db",
+                "transit": "../transit",
+                "state": "state.json",
+                "node_id": "neutral node",
+                "namespace": "sample app",
+            }
+        ).encode("utf-8")
+
+        config = SyncConfig.from_bytes(payload, source_path=config_path)
+
+        self.assertEqual((self.root / "a.db").resolve(), config.database)
+        self.assertEqual((self.root / "transit").resolve(), config.transit)
+        self.assertEqual((config_path.parent / "state.json").resolve(), config.state)
+        self.assertEqual("neutral-node", config.node_id)
+        self.assertEqual("sample-app", config.namespace)
+
+    def test_wal_source_push_publishes_one_closed_snapshot_without_sidecars(self) -> None:
+        connection = sqlite3.connect(self.a_db)
+        try:
+            self.assertEqual("wal", connection.execute("PRAGMA journal_mode=WAL").fetchone()[0])
+            connection.execute(
+                "UPDATE items SET value = 'from-wal', updated_at = '2029-01-01T00:00:00Z' "
+                "WHERE id = 'shared'"
+            )
+            connection.commit()
+            self.assertTrue(self.a_db.with_name(f"{self.a_db.name}-wal").is_file())
+
+            snapshot = self.a.push()
+        finally:
+            connection.close()
+
+        self.assertEqual("from-wal", item(snapshot.path, "items", "shared")[1])
+        connection = sqlite3.connect(snapshot.path)
+        try:
+            journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual("delete", journal_mode)
+        self.assertEqual(
+            sorted((snapshot.path.name, snapshot.manifest_path.name)),
+            transit_files(self.transit),
+        )
+
+    def test_wal_source_scanner_failure_removes_partial_snapshot_and_sidecars(self) -> None:
+        connection = sqlite3.connect(self.a_db)
+        try:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute(
+                "UPDATE items SET value = ? WHERE id = 'shared'",
+                ("deploy note: use " + "ghp_" + "D" * 24,),
+            )
+            connection.commit()
+            with self.assertRaises(SyncError):
+                self.a.push()
+        finally:
+            connection.close()
+
+        self.assertEqual([], transit_files(self.transit))
+
+    def test_wal_source_quick_check_failure_removes_partial_snapshot_and_sidecars(self) -> None:
+        connection = sqlite3.connect(self.a_db)
+        try:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute(
+                "UPDATE items SET value = 'from-wal' WHERE id = 'shared'"
+            )
+            connection.commit()
+            with (
+                mock.patch.object(TransitSync, "_quick_check", side_effect=SyncError("forced")),
+                self.assertRaises(SyncError),
+            ):
+                self.a.push()
+        finally:
+            connection.close()
+
+        self.assertEqual([], transit_files(self.transit))
+
+    def test_unrecognized_sqlite_sidecar_fails_closed_and_is_removed(self) -> None:
+        def leave_sidecar(path: Path) -> None:
+            path.with_name(f"{path.name}-future-sidecar").write_bytes(b"temporary")
+
+        with (
+            mock.patch.object(TransitSync, "_quick_check", side_effect=leave_sidecar),
+            self.assertRaisesRegex(SyncError, "Unclosed SQLite snapshot"),
+        ):
+            self.a.push()
+
+        self.assertEqual([], transit_files(self.transit))
+
+    def test_wal_source_manifest_failure_removes_snapshot_and_sidecars(self) -> None:
+        def fail_manifest(path: Path, _payload: dict) -> None:
+            path.with_name(f".{path.name}.forced.tmp").write_text(
+                "partial manifest",
+                encoding="utf-8",
+            )
+            raise OSError("forced")
+
+        connection = sqlite3.connect(self.a_db)
+        try:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute(
+                "UPDATE items SET value = 'from-wal' WHERE id = 'shared'"
+            )
+            connection.commit()
+            with (
+                mock.patch(
+                    "sqlite_transit_sync.core._atomic_json_write",
+                    side_effect=fail_manifest,
+                ),
+                self.assertRaises(OSError),
+            ):
+                self.a.push()
+        finally:
+            connection.close()
+
+        self.assertEqual([], transit_files(self.transit))
+
+    def test_backup_failure_removes_partial_snapshot_artifacts(self) -> None:
+        invalid_database = self.root / "invalid.db"
+        invalid_database.write_bytes(b"not a SQLite database")
+        sync = TransitSync(
+            SyncConfig(
+                invalid_database,
+                self.transit,
+                self.root / "invalid-state.json",
+                "node-invalid",
+                "demo",
+            )
+        )
+
+        with self.assertRaises(sqlite3.DatabaseError):
+            sync.push()
+
+        self.assertEqual([], transit_files(self.transit))
 
     def test_pull_requires_precreated_application_schema(self) -> None:
         self.a.push()

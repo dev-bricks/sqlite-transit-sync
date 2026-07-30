@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Close every backup into `DELETE` journal mode before publication and remove the
+  complete temporary SQLite artifact family on backup, redaction, credential-scan,
+  verification, or manifest failure. WAL source databases can no longer leave
+  unmanifested `-wal`, `-shm`, `-journal`, or similar sidecars in transit.
+- Add `SyncConfig.from_bytes(payload, source_path=...)` so callers can hash and
+  parse the exact same config bytes. `from_file()` delegates to this parser and
+  keeps identical source-relative path semantics.
+
 ## 0.2.0 — 2026-07-29
 
 - **Dokumentation, SEO & Discoverability**: `llms.txt` Verifikations-Timestamp auf 2026-07-30 aktualisiert, GFM LLM Note Callout (`> [!NOTE]`) in `README.md` & `README_de.md` integriert, 19/19 Pytest-Tests verifiziert [G 2026-07-30].
