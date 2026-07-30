@@ -327,6 +327,31 @@ Ausfall einzelner Server über mehrere dauerhaft betriebene Knoten überstehen m
 Siehe [ARCHITECTURE.md](ARCHITECTURE.md), [README.md](README.md) und
 [SECURITY.md](SECURITY.md).
 
+<!-- BEGIN ELLMOS BUNDLE DISCOVERY DE -->
+
+## Bundles und Partner
+
+Geprüfte Discovery-Projektion für `module:sqlite-transit-sync` aus
+`catalog:v4-bundles`
+(`a52688938bcad21469beb546acfe6dd79ca40196a2bbaf246e5bd6aaac4bbbd7`).
+Das Ziel-Repository ist `public`. Die Bundle-Manifeste bleiben die Autorität
+für Mitgliedschaften; dieser Abschnitt installiert oder aktiviert keine
+Komponenten. Die Freigabe beruht auf einem öffentlichen Modul-Registry-Eintrag
+und einer ausdrücklichen Default-deny-Allowlist für Bundles.
+
+### `ellmos-sync-federation-bundle`
+
+- Sichtbarkeit des Bundle-Rezepts: `private`; Rolle: `declared-component`;
+  Anforderung: `recommended`.
+- Modulpartner: `module:cloud-safe-exporter`, `module:receipt-validator`,
+  `module:sync`, `module:system-explorer-export`, `module:system-gap-master`.
+- Skill-Partner: `skill:agent-config-sync`, `skill:mcp-config-sync`,
+  `skill:system-onboarding`.
+
+Kompositions- und Runtime-Details werden bewusst nicht offengelegt.
+
+<!-- END ELLMOS BUNDLE DISCOVERY DE -->
+
 ## Maschinenlesbarer Index
 
 Für KI-Agenten, LLMs und automatisierte Werkzeuge steht unter [llms.txt](llms.txt)
