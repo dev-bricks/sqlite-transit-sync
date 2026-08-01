@@ -10,18 +10,22 @@ from .core import (
     TransitSync,
     load_secret_patterns,
 )
-from .replica import (
-    ReplicaImport,
-    ReplicaSnapshot,
-    ReplicaTransit,
+from .republica import (
+    Envelope,
+    EnvelopeReceipt,
+    RepublicaImport,
+    RepublicaSnapshot,
+    RepublicaTransit,
     generate_key,
 )
 
 __all__ = [
+    "Envelope",
+    "EnvelopeReceipt",
     "MergeReport",
-    "ReplicaImport",
-    "ReplicaSnapshot",
-    "ReplicaTransit",
+    "RepublicaImport",
+    "RepublicaSnapshot",
+    "RepublicaTransit",
     "SecretPattern",
     "Snapshot",
     "SyncConfig",
@@ -32,4 +36,4 @@ __all__ = [
     "load_secret_patterns",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

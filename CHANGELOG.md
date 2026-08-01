@@ -2,13 +2,33 @@
 
 ## Unreleased
 
-- **Publish-replica mode (`publish` / `import-replica`), additive to `push`/`pull`.**
+- **The one-way mode is now called Republica** (subtitle: "the showcase method"). Each node
+  puts an encrypted showcase of its database into a shared file area; everyone can look,
+  nobody can change it. Renamed throughout: module `republica.py`, `RepublicaTransit`,
+  config key `republica_root`, default path `~/.republica`, snapshot suffix `.republica`,
+  and CLI commands `republica-publish` / `republica-list` / `republica-import`. Not on PyPI
+  yet, so no compatibility shim is carried — the previous names existed for hours.
+- **Documented as a permanent fallback layer, not a migration step** (ADR-010). Direct sync
+  over a tunnel and Republica over a file area are meant to run side by side, with a failure
+  table showing which mode still carries when the other stalls: host asleep, VPN down, key
+  rotation pending, shared folder broken. A fallback left to rot is worthless on the day it
+  is needed. Setup cost is stated plainly: one key transfer over any channel that is not the
+  transport itself.
+- **Sealed envelope: `envelope-send` / `envelope-receive`** (ADR-009). One encrypted file over
+  the same channel and key, for the bootstrap case where two machines share no secure channel
+  yet and a credential must cross. Two showcase rules are deliberately inverted: the credential
+  scan does not apply (it would block the payload being moved), and the plaintext is written
+  **as a file** with mode `0600` and never into a database. Envelopes are removed from the
+  transit after receipt; unsealing into the transit or a cloud-synced folder is refused; the
+  filename is re-sanitised on arrival so a crafted manifest cannot escape the target directory.
+
+- **Republica mode (`publish` / `republica-import`), additive to `push`/`pull`.**
   Distributes a database one way instead of converging two: the import materialises a
-  separate read-only replica per source node under `replica_root` and never touches the
+  separate read-only replica per source node under `republica_root` and never touches the
   local database. Payload is a curated SQL dump, gzip-compressed and Fernet-encrypted, so a
   synchronised cloud folder no longer carries readable content. New config keys `key_file`,
-  `replica_root` and `allow_key_in_synced_folder`; new CLI commands `keygen`, `publish`,
-  `replicas` and `import-replica`. See ADR-006 to ADR-008.
+  `republica_root` and `allow_key_in_synced_folder`; new CLI commands `keygen`, `publish`,
+  `republica-list` and `republica-import`. See ADR-006 to ADR-008.
 - **Restore FTS databases correctly.** A plain `iterdump` cannot be replayed when the
   database contains a full-text index: it writes the virtual table through
   `PRAGMA writable_schema` without a schema reload, then re-emits the shadow tables that

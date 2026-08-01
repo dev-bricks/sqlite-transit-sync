@@ -5,7 +5,7 @@
 
 ## Funktionsfähig
 
-- Publish-Replica-Modus: verschlüsselte Einweg-Verteilung (`publish`/`import-replica`),
+- Republica-Modus: verschlüsselte Einweg-Verteilung (`publish`/`republica-import`),
   separate schreibgeschützte Replica je Quellknoten, kein Merge (ADR-006 bis ADR-008)
 - kuratierter SQL-Dump mit korrektem Wiederherstellen von FTS-Volltextindizes
 

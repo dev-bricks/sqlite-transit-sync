@@ -10,7 +10,7 @@
 [![Ecosystem: dev-bricks](https://img.shields.io/badge/Ecosystem-dev--bricks-blue.svg)](https://github.com/dev-bricks)
 [![Umbrella: open-bricks](https://img.shields.io/badge/Umbrella-open--bricks-purple.svg)](https://github.com/open-bricks)
 [![Architecture](https://img.shields.io/badge/architecture-local--first-success.svg)](#teil-der-ellmos-stack-familie)
-[![Tests](https://img.shields.io/badge/tests-44%2F44%20passed-brightgreen.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-55%2F55%20passed-brightgreen.svg)](#tests)
 [![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
 
 > [!NOTE]
@@ -79,10 +79,10 @@ geprüfte Snapshots mit von der Anwendung wählbaren Merge-Policies.
   Snapshot weiterhin zugangsdatenähnliche Werte enthält (standardmäßig aktiv;
   gemeldet wird `table.column`, niemals der Wert selbst);
 - eigene `MergePolicy` für fachliche Regeln, Tombstones oder CRDTs;
-- optionaler [Publish-Replica-Modus](#publish-replica-modus), der eine Datenbank
+- optionaler [Republica-Schaufenster-Modus](#republica--die-schaufenster-methode), der eine Datenbank
   einseitig als verschlüsselte Nutzlast verteilt und als eigenständige,
-  schreibgeschützte Replica materialisiert, statt sie zu mergen;
-- Python-API und JSON-CLI ohne zusätzliche Laufzeitabhängigkeiten (der Replica-Modus
+  schreibgeschütztes Schaufenster materialisiert, statt sie zu mergen;
+- Python-API und JSON-CLI ohne zusätzliche Laufzeitabhängigkeiten (der Republica-Modus
   ergänzt `cryptography`).
 
 ## Installation
@@ -171,8 +171,8 @@ config_sha256 = hashlib.sha256(payload).hexdigest()
 | `secret_scan_skip_tables` | `[]` | Tabellen, die der Scan auslässt; bei einer einzelnen störenden Tabelle besser als die vollständige Abschaltung |
 | `secret_scan_extra_patterns` | `[]` | Zusätzliche reguläre Ausdrücke, ergänzend zur Trigger-Datei |
 | `secret_patterns_file` | `null` (mitgelieferte Datei) | Pfad zu einer eigenen Trigger-Datei; **ersetzt** die eingebauten Muster |
-| `key_file` | `null`, sonst `$SQLITE_TRANSIT_SYNC_KEY_FILE` | Fernet-Schlüssel für den Replica-Modus; muss außerhalb des Transits liegen |
-| `replica_root` | `~/.transit-replicas` | Ablageort importierter Replicas; muss außerhalb des Transits liegen |
+| `key_file` | `null`, sonst `$SQLITE_TRANSIT_SYNC_KEY_FILE` | Fernet-Schlüssel für den Republica-Modus; muss außerhalb des Transits liegen |
+| `republica_root` | `~/.republica` | Ablageort importierter Schaufenster; muss außerhalb des Transits liegen |
 | `allow_key_in_synced_folder` | `false` | Hebt die Prüfung auf, die einen Schlüssel in einem Cloud-Ordner ablehnt |
 
 Der `state`-Standardwert in dieser Tabelle gilt, wenn eine JSON-Konfiguration ohne
@@ -232,34 +232,61 @@ abgeschaltet und schützt dann gar nicht mehr. Ein sauberer Scan bedeutet „kei
 bekanntes Muster gefunden“, niemals „dieser Snapshot enthält garantiert keine
 Secrets“.
 
-## Publish-Replica-Modus
+## Republica — die Schaufenster-Methode
 
-`push`/`pull` gleicht zwei Datenbanken einander an. Manchmal ist genau das nicht gewollt:
-Man möchte *lesen*, was ein anderer Knoten weiß, ohne irgendetwas davon in die eigenen
-Zeilen einzurechnen – und der Transportweg ist ein synchronisierter Cloud-Ordner, der die
-Inhalte nicht im Klartext sehen soll.
+Jede Maschine stellt ein **verschlüsseltes Schaufenster** ihrer Datenbank in eine geteilte
+Dateifläche. Alle anderen können hineinsehen, niemand kann es verändern. Daher der Name: eine
+Wiederveröffentlichung der Datenbank, lesbar nur für den, der den Schlüssel hat.
 
-Dafür gibt es `publish` / `import-replica`. Der Import legt **pro Quellknoten eine eigene,
-schreibgeschützte Datenbank** an und öffnet die lokale Datenbank überhaupt nicht:
+Zu verwenden, wenn `push`/`pull` nicht passt: Man möchte *lesen*, was ein anderer Knoten
+weiß, ohne es in die eigenen Zeilen einzurechnen — oder die Maschinen teilen nichts als einen
+Ordner (kein Server, keine offenen Ports, kein Vertrauens-Setup), und dieser Ordner soll die
+Inhalte nicht im Klartext sehen.
+
+### Zwei Betriebsarten, bewusst redundant
+
+Republica ist **keine Übergangslösung, bis ein richtiger Tunnel steht.** Es ist die zweite
+von zwei Betriebsarten, die nebeneinander laufen sollen, damit der Ausfall der einen die
+andere nicht stoppt:
+
+| Ausfall | Direkter Abgleich (`push`/`pull`) | Republica |
+|---|---|---|
+| Eine Maschine schläft oder ist offline | steht still (kein Gegenüber) | läuft weiter — jetzt ablegen, später abholen |
+| VPN/SSH tot, Netz blockiert den Tunnel | steht still | läuft weiter über die Dateifläche |
+| Schlüsselrotation oder Trust-Setup offen | steht still | läuft weiter mit dem geteilten Schlüssel |
+| Geteilter Ordner kaputt, voll oder desynchron | läuft weiter | steht still |
+| Keine Merge-Regel für einen Datensatz vereinbart | nicht anwendbar | läuft weiter — es wird nichts gemergt |
+
+Der ganze Nutzen liegt darin, dass es an dem Tag funktioniert, an dem der andere Weg es nicht
+tut. Also eingerichtet lassen und mitlaufen lassen, auch wenn der direkte Weg gerade
+problemlos läuft.
+
+### Einrichtungskosten: ein einziger Schlüsseltransfer
+
+Der geteilte Schlüssel muss die anderen Maschinen über **irgendeinen Kanal erreichen, der
+nicht der Transportweg selbst ist** — ein bestehender verschlüsselter Tunnel, ein
+Passwortmanager, ein USB-Stick, telefonisch vorgelesen. Einmal. Danach genügt ein schlichter
+geteilter Ordner, dauerhaft, selbst einer, dem man nicht vertraut.
 
 ```text
-replica_root/
-  laptop/my-app.sqlite      <- schreibgeschützte Kopie der Laptop-Datenbank
-  workstation/my-app.sqlite <- schreibgeschützte Kopie der Workstation-Datenbank
+republica_root/
+  laptop/my-app.sqlite      <- schreibgeschütztes Schaufenster der Laptop-Datenbank
+  workstation/my-app.sqlite <- schreibgeschütztes Schaufenster der Workstation-Datenbank
 ```
 
 ```bash
-# einmalig, auf lokaler Platte - nie im Transit, nie in einem Cloud-Ordner
-sqlite-transit-sync keygen --key-file ~/.keys/replica.key
+# Einmalig, auf lokaler Platte - nie im Transit, nie in einem Cloud-Ordner.
+# Diese Datei dann out-of-band auf die anderen Maschinen kopieren; dort NICHT keygen aufrufen.
+sqlite-transit-sync keygen --key-file ~/.keys/republica.key
 
 sqlite-transit-sync init --config node.json \
   --database ./app.db --transit ./shared-transit \
   --node-id laptop --namespace my-app \
-  --key-file ~/.keys/replica.key
+  --key-file ~/.keys/republica.key
 
-sqlite-transit-sync publish        --config node.json   # verschlüsseln und veröffentlichen
-sqlite-transit-sync replicas       --config node.json   # was andere Knoten anbieten
-sqlite-transit-sync import-replica --config node.json   # lokal materialisieren
+sqlite-transit-sync republica-publish --config node.json   # verschlüsseln und veröffentlichen
+sqlite-transit-sync republica-list    --config node.json   # was andere Knoten anbieten
+sqlite-transit-sync republica-import  --config node.json   # lokal materialisieren
 ```
 
 Benötigt die optionale Verschlüsselung: `pip install 'sqlite-transit-sync[crypto]'`.
@@ -277,12 +304,38 @@ absichtliche Änderung selbst dann, wenn der Manifest-Hash passend nachgerechnet
 besitzt, kann einen gültigen Snapshot veröffentlichen. Genau deshalb bleibt eine Replica
 getrennt und wird nie gemergt. Der Schlüssel gehört nicht in den Transportweg: ein Schlüssel
 im Transitverzeichnis wird abgelehnt, ebenso einer in einem erkennbar synchronisierten
-Ordner (abschaltbar über `allow_key_in_synced_folder`). Dasselbe gilt für `replica_root` –
+Ordner (abschaltbar über `allow_key_in_synced_folder`). Dasselbe gilt für `republica_root` –
 eine entschlüsselte Replica im Transit würde im Klartext weiterverteilt.
 
 **Grenze:** Ein Volltextindex ohne eigenen Inhalt (`content=''`) lässt sich nicht neu
 aufbauen, weil die Quelle dafür fehlt. Solche Tabellen meldet das Manifest unter
 `contentless_fts`, statt still leer anzukommen.
+
+### Sealed Envelope: eine Datei, derselbe Kanal, niemals eine Datenbank
+
+Das Henne-Ei-Problem: Zwei Maschinen teilen *noch* keinen sicheren Kanal — und genau deshalb
+muss ein Zugangsdatum hinüber. Derselbe Schlüssel und derselbe Ordner befördern auch eine
+einzelne verschlüsselte Datei.
+
+```bash
+sqlite-transit-sync envelope-send    --config node.json --file ./api-token.txt --label api-token
+sqlite-transit-sync envelope-receive --config node.json --into ~/credentials
+```
+
+Die Datei kommt **als Datei** an (Rechte `0600`), benannt `<quellknoten>__<dateiname>`, und
+landet **nie in einer Datenbank** — ein Geheimnis in einer Datenbank wird von jedem Backup,
+jedem Index und jeder Synchronisierung weiterkopiert, die sie berührt. In Notizen gehört der
+Fundort, niemals das Geheimnis selbst.
+
+Zwei Regeln des Schaufensters sind hier bewusst umgekehrt: Der **Credential-Scan gilt nicht**
+(er würde genau die Fracht blockieren, die befördert werden soll), und der Umschlag wird nach
+dem Empfang **aus dem Transit entfernt**, damit ein Geheimnis nicht im geteilten Ordner liegen
+bleibt. Das Entpacken in den Transit oder in einen erkennbar cloud-synchronisierten Ordner
+wird verweigert, und der Dateiname wird beim Empfang erneut entschärft, damit ein
+manipuliertes Manifest nicht außerhalb des Zielverzeichnisses schreiben kann.
+
+Das ist ein Kurier, kein Passwort-Manager und keine Dateisynchronisierung — wenige, kleine
+Umschläge.
 
 ## Das hier ist kein Passwort-Manager
 

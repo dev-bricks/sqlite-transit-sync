@@ -3,13 +3,13 @@
 > Local-first SQLite synchronization through verified transit snapshots and configurable row-level merge policies. Extracted from the BACH ProSync architecture for standalone, zero-dependency Python projects.
 
 - Last-checked: 2026-08-01
-- Version: 0.3.0
+- Version: 0.4.0
 - Architecture: Local-First / Zero-Dependency / Snapshot-based Transit
 - Module Family: `dev-bricks/sync-master` companion (`sync.database`)
 
 ## System Overview
 
-`sqlite-transit-sync` is a Python 3.10+ library (zero dependencies for merge mode; the optional publish-replica mode adds `cryptography`) and CLI for synchronizing local SQLite databases across untrusted or asynchronous file transports (shared folders, object-store mounts, removable drives, or sync-master yards). Verified 44/44 passing test suite on 2026-08-01.
+`sqlite-transit-sync` is a Python 3.10+ library (zero dependencies for merge mode; the optional Republica mode adds `cryptography`) and CLI for synchronizing local SQLite databases across untrusted or asynchronous file transports (shared folders, object-store mounts, removable drives, or sync-master yards). Verified 55/55 passing test suite on 2026-08-01.
 
 It avoids live SQLite database locking over file sync by using:
 1. Online consistent snapshots via SQLite Backup API (`sqlite3.Connection.backup`).
@@ -20,7 +20,7 @@ It avoids live SQLite database locking over file sync by using:
 
 ## Key Features
 
-- **Zero External Dependencies (core)**: Standard library Python 3.10+ only for `push`/`pull`. The optional publish-replica mode adds `cryptography` via `pip install 'sqlite-transit-sync[crypto]'`.
+- **Zero External Dependencies (core)**: Standard library Python 3.10+ only for `push`/`pull`. The optional Republica mode adds `cryptography` via `pip install 'sqlite-transit-sync[crypto]'`.
 - **Atomic & Safe Transit**: Never syncs live SQLite files directly. Uses isolated snapshot zones.
 - **Configurable Merge Policies**: Built-in `LastWriteWinsPolicy` and support for custom domain `MergePolicy` implementations (tombstones, CRDTs).
 - **Data Privacy & Exclusion**: Exclude sensitive tables from transit snapshots with post-delete `VACUUM`.
@@ -53,29 +53,49 @@ sqlite-transit-sync status --config node.json
 sqlite-transit-sync verify --config node.json
 ```
 
-### Publish-replica mode (one-way, encrypted; requires `[crypto]` extra)
+### Republica - the showcase method (one-way, encrypted; requires `[crypto]` extra)
 
-Distributes a database instead of converging two. `import-replica` writes a separate
-read-only database per source node under `replica_root` and never touches the local one.
+Each node publishes an encrypted showcase of its database into a shared file area.
+`republica-import` writes a separate read-only database per source node under
+`republica_root` and never touches the local one. Designed as a PERMANENT fallback layer
+next to direct tunnel-based sync, not as a migration step: when a host is offline, a VPN is
+down or a trust setup is pending, Republica still carries; when the shared folder breaks,
+direct sync still carries. Setup cost is one key transfer over any channel that is not the
+transport itself.
 
 ```bash
-# Generate the shared Fernet key - on local disk, never inside the transit
-sqlite-transit-sync keygen --key-file ~/.keys/replica.key
+# Generate the shared Fernet key - local disk only, never inside the transit.
+# Copy it to the other machines out of band; do NOT run keygen there.
+sqlite-transit-sync keygen --key-file ~/.keys/republica.key
 
 # Publish: backup -> curated SQL dump -> gzip -> Fernet -> transit/<node>/
-sqlite-transit-sync publish --config node.json
+sqlite-transit-sync republica-publish --config node.json
 
-# List foreign replica snapshots offered in the transit
-sqlite-transit-sync replicas --config node.json
+# List showcases other nodes offer
+sqlite-transit-sync republica-list --config node.json
 
-# Decrypt, restore and rebuild FTS into replica_root/<source-node>/<namespace>.sqlite
-sqlite-transit-sync import-replica --config node.json [--node <source>]
+# Decrypt, restore and rebuild FTS into republica_root/<source-node>/<namespace>.sqlite
+sqlite-transit-sync republica-import --config node.json [--node <source>]
 ```
 
-Config keys: `key_file`, `replica_root`, `allow_key_in_synced_folder`.
+Config keys: `key_file`, `republica_root`, `allow_key_in_synced_folder`.
 Guarantees: content is never in the clear in transit; Fernet HMAC detects deliberate
-modification even with a recomputed manifest hash; an imported replica is never merged.
-Limit: Fernet authenticates the key, not the sender — node identity is out of scope.
+modification even with a recomputed manifest hash; an imported showcase is never merged.
+Limit: Fernet authenticates the key, not the sender - node identity is out of scope.
+
+### Sealed envelope (single encrypted file, same channel and key)
+
+For the bootstrap problem: two machines share no secure channel yet and a credential must
+cross. The plaintext arrives AS A FILE (mode 0600) and never enters a database.
+
+```bash
+sqlite-transit-sync envelope-send    --config node.json --file ./api-token.txt --label api-token
+sqlite-transit-sync envelope-receive --config node.json --into ~/credentials [--keep]
+```
+
+Inverted rules vs. showcases: the credential scan does not apply (it would block the payload
+being moved), and the envelope is removed from the transit after receipt. Unsealing into the
+transit or a cloud-synced folder is refused; the filename is re-sanitised on arrival.
 
 ## Python API Usage
 

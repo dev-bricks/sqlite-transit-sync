@@ -4,7 +4,7 @@
       Der Replica-Modus verschlüsselt bereits (ADR-007), belegt damit aber nur den Besitz des
       gemeinsamen Schlüssels. Offen bleibt die Knoten-Identität — erst damit wäre ein Merge
       fremder Daten vertretbar (heute bewusst getrennte Replica).
-- [ ] Retention für Replica-Snapshots: alte `*.sqlite-replica` je Knoten im Transit aufräumen,
+- [ ] Retention für Replica-Snapshots: alte `*.republica` je Knoten im Transit aufräumen,
       ohne fremde Snapshots unkontrolliert zu löschen (hängt am selben Retention-Punkt unten).
 - [ ] Inhaltslose FTS-Indizes (`content=''`) im Replica-Modus: heute nur im Manifest gemeldet,
       nicht rekonstruierbar. Falls ein Anwendungsfall auftaucht, Schattentabellen mitführen.

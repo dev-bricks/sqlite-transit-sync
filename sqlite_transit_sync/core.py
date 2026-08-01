@@ -164,7 +164,7 @@ class SyncConfig:
     # Publish-replica mode only (see replica.py). Unused by push/pull, so an existing
     # configuration keeps working untouched.
     key_file: Path | None = None
-    replica_root: Path | None = None
+    republica_root: Path | None = None
     allow_key_in_synced_folder: bool = False
 
     def __post_init__(self) -> None:
@@ -188,16 +188,16 @@ class SyncConfig:
                 self.key_file = Path(from_env)
         if self.key_file is not None:
             self.key_file = Path(self.key_file).expanduser().resolve()
-        self.replica_root = (
-            Path(self.replica_root).expanduser().resolve()
-            if self.replica_root is not None
-            else Path.home() / ".transit-replicas"
+        self.republica_root = (
+            Path(self.republica_root).expanduser().resolve()
+            if self.republica_root is not None
+            else Path.home() / ".republica"
         )
         if self.database == self.transit or self.transit in self.database.parents:
             raise ValueError("The live database must not be inside the transit directory")
         # An imported replica holds decrypted foreign data. Inside the transit it would
         # be republished in the clear — the exact outcome the encryption prevents.
-        if self.replica_root == self.transit or self.transit in self.replica_root.parents:
+        if self.republica_root == self.transit or self.transit in self.republica_root.parents:
             raise ValueError("Replicas must not be stored inside the transit directory")
 
     @classmethod
@@ -237,7 +237,7 @@ class SyncConfig:
                 else None
             ),
             key_file=resolve(raw["key_file"]) if raw.get("key_file") else None,
-            replica_root=resolve(raw["replica_root"]) if raw.get("replica_root") else None,
+            republica_root=resolve(raw["republica_root"]) if raw.get("republica_root") else None,
             allow_key_in_synced_folder=bool(raw.get("allow_key_in_synced_folder", False)),
         )
 
@@ -259,7 +259,7 @@ class SyncConfig:
                 str(self.secret_patterns_file) if self.secret_patterns_file else None
             ),
             "key_file": str(self.key_file) if self.key_file else None,
-            "replica_root": str(self.replica_root) if self.replica_root else None,
+            "republica_root": str(self.republica_root) if self.republica_root else None,
             "allow_key_in_synced_folder": self.allow_key_in_synced_folder,
         }
         _atomic_json_write(target, payload)

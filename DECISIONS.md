@@ -57,7 +57,59 @@ Richtungen (`test_vendor_prefixes_do_not_match_inside_ordinary_words` und
 SHA-256 und Manifest erkennen Übertragungsfehler. Ein feindlicher Transport benötigt
 zusätzlich Signaturen oder einen authentifizierten Kanal.
 
-## ADR-006: Publish-Replica als zweite Betriebsart, nicht als Ersatz
+## ADR-010: Zwei Betriebsarten sind dauerhaft redundant, nicht Übergang
+
+Republica ist **keine Übergangslösung, bis der direkte Weg steht**. Das Zielbild sind zwei
+Betriebsarten, die nebeneinander bestehen bleiben:
+
+| | Direkter Abgleich (`push`/`pull`) | Republica (`republica-*`) |
+|---|---|---|
+| Weg | Tunnel zwischen Maschinen (SSH, Tailscale, LAN) | irgendeine Datei-Austauschfläche |
+| Richtung | beidseitig, konvergierend | einseitig, Schaufenster |
+| Setzt voraus | beide Hosts erreichbar, Trust-Setup, Merge-Regel | ein Schlüssel, einmalig übergeben |
+| Ergebnis | eine zusammengeführte Datenbank | je Quellknoten eine eigene Lesekopie |
+| Latenz | Minuten | so schnell wie die Austauschfläche |
+
+**Fällt eine aus, trägt die andere.** Der Tunnel fällt aus, wenn ein Host schläft, das Netz
+feindlich ist, ein Schlüssel rotiert oder jemand am VPN schraubt. Republica fällt aus, wenn
+die Austauschfläche klemmt. Beides passiert, aber selten gleichzeitig — genau das ist der
+Nutzen. Eine Fallback-Ebene, die man „erstmal" aufsetzt und dann verrotten lässt, ist am Tag
+des Ausfalls wertlos; sie muss also **mitgepflegt und mitgetestet** werden, auch wenn der
+direkte Weg gerade problemlos läuft.
+
+Der Preis dieser Redundanz ist **ein einziger Schlüsseltransfer** über einen Kanal, der nicht
+der Transportweg selbst ist: ein bestehender Tunnel, ein Passwortmanager, ein USB-Stick, ein
+vorgelesener Code. Danach genügt ein geteilter Ordner — dauerhaft und selbst dann, wenn man
+diesem Ordner nicht vertraut.
+
+## ADR-009: Sealed Envelope — Zugangsdaten als Datei, niemals in einer Datenbank
+
+Dasselbe Kanal-und-Schlüssel-Paar transportiert auf Wunsch eine **einzelne Datei**
+(`envelope-send`/`envelope-receive`). Der Anlass ist das Henne-Ei-Problem: Zwei Maschinen
+teilen noch keinen sicheren Kanal, und genau deshalb muss ein Zugangsdatum hinüber.
+
+Zwei Regeln des Schaufensters sind hier **bewusst umgekehrt**:
+
+1. **Der Credential-Scan gilt nicht.** Er soll verhindern, dass ein Zugangsdatum versehentlich
+   mitreist. Hier ist es die Fracht — ein Scan würde genau das blockieren, was befördert werden
+   soll.
+2. **Der Klartext landet als Datei, nie in einer Datenbank.** Ein Zugangsdatum in einer
+   Datenbank wird von jedem Backup, jedem Index und jeder Synchronisierung weiterkopiert, die
+   sie berührt. Deshalb schreibt der Empfang in ein Verzeichnis (üblicherweise den
+   Zugangsdaten-Ordner) mit engen Rechten. In Notizen gehört nur der **Fundort**.
+
+Absicherungen, die daraus folgen: Das Zielverzeichnis darf weder der Transit noch ein
+erkennbar synchronisierter Ordner sein — sonst läge das entschlüsselte Geheimnis wieder offen.
+Der Umschlag wird nach dem Empfang standardmäßig **aus dem Transit entfernt**, damit ein
+Geheimnis nicht dauerhaft im geteilten Ordner liegen bleibt. Der Dateiname wird beim Senden
+**und beim Empfangen erneut** entschärft: Der Empfänger darf einem Namen nicht trauen, der
+durch einen fremden Ordner gelaufen ist, sonst schriebe ein manipuliertes Manifest außerhalb
+des Zielverzeichnisses.
+
+**Abgrenzung:** Das ist ein Kurier, kein Passwort-Manager und keine Dateisynchronisierung.
+Für viele oder große Dateien ist es das falsche Werkzeug.
+
+## ADR-006: Republica als zweite Betriebsart, nicht als Ersatz
 
 `push`/`pull` gleichen zwei Datenbanken **einander an**: ein fremder Snapshot wird per
 `MergePolicy` in lokale Zeilen eingerechnet. Das setzt voraus, dass beide Seiten sich über
@@ -65,8 +117,8 @@ eine Konfliktregel einig sind. Für den Fall „ich will die Daten des anderen *
 nichts von ihm in meinen Bestand einrechnen" gibt es dafür keine sinnvolle Policy — jede
 Wahl wäre eine erfundene fachliche Entscheidung (ADR-002/ADR-003).
 
-Deshalb `publish`/`import-replica`: derselbe geprüfte Snapshot-Weg, aber der Import
-**materialisiert eine eigene Datenbank neben der lokalen** (`replica_root/<knoten>/<namespace>.sqlite`)
+Deshalb `republica-publish`/`republica-import`: derselbe geprüfte Snapshot-Weg, aber der Import
+**materialisiert eine eigene Datenbank neben der lokalen** (`republica_root/<knoten>/<namespace>.sqlite`)
 und fasst den lokalen Bestand nicht an. Die lokale Datenbank wird beim Import nicht einmal
 geöffnet. Damit ist die Betriebsart additiv: bestehende Konfigurationen und Merge-Semantik
 bleiben unverändert.
@@ -97,7 +149,7 @@ verändern.
 ein Widerspruch in sich und wird hart abgelehnt; ein Schlüssel in einem erkennbar
 synchronisierten Ordner (OneDrive, Dropbox, …) ebenfalls — abschaltbar über
 `allow_key_in_synced_folder`, falls die Erkennung danebenliegt. Dieselbe Regel gilt für
-`replica_root`: eine entschlüsselte Replica im Transit würde im Klartext weiterverteilt.
+`republica_root`: eine entschlüsselte Replica im Transit würde im Klartext weiterverteilt.
 
 **Der Cipher ist eine optionale Abhängigkeit.** `push`/`pull` kommt weiter ohne
 Fremdpakete aus; nur dieser Modus braucht `cryptography` (`pip install

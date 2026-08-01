@@ -1,18 +1,41 @@
 # Architecture
 
-## Two operating modes
+## Two operating modes, meant to coexist
 
-| | `push` / `pull` | `publish` / `import-replica` |
+| | Direct sync (`push` / `pull`) | **Republica** (`republica-*`) |
 |---|---|---|
-| Direction | two-way convergence | one-way distribution |
+| Direction | two-way convergence | one-way showcase |
+| Transport | a tunnel between machines (SSH, Tailscale, LAN) | any file area, even untrusted |
 | Effect on the local database | rows are merged in | untouched, never opened |
-| Result | one converged database | a separate read-only replica per source node |
+| Result | one converged database | a separate read-only copy per source node |
 | Payload | SQLite file | curated SQL dump, gzip, Fernet-encrypted |
-| Needs agreement on | a merge policy | only a shared key |
+| Needs | reachable hosts, trust setup, an agreed merge policy | one key, handed over once |
 | Extra dependency | none | `cryptography` |
 
 Both use the same publication gate: journal closing, table redaction, credential scan,
 `quick_check`, sidecar checks, manifest and SHA-256.
+
+**These are redundant layers, not a migration path.** Republica is not a stopgap until the
+tunnel exists — it is the mode that still works when the tunnel does not:
+
+| Failure | Direct sync | Republica |
+|---|---|---|
+| A machine is asleep or offline | stalls (no peer) | keeps working (drop-off, pick-up later) |
+| Network blocks the tunnel, VPN or SSH is down | stalls | keeps working over the file area |
+| Key rotation or trust setup pending | stalls | keeps working with the old shared key |
+| The shared folder is broken, full or desynced | keeps working | stalls |
+| No merge policy agreed for a dataset | not applicable | keeps working (no merge needed) |
+
+A fallback that is set up once and then left to rot is worthless on the day it is needed, so
+Republica is meant to stay configured and exercised even while the direct path is healthy.
+
+## Sealed envelope
+
+The same channel and key also carry a single encrypted file (`envelope-send` /
+`envelope-receive`). It exists for the bootstrap problem: two machines share no secure
+channel yet, and a credential has to cross. The plaintext is written **as a file** into a
+local directory and never into a database, the credential scan deliberately does not apply,
+and the envelope is removed from the transit once received. See ADR-009.
 
 ## Data flow — merge mode
 
@@ -28,20 +51,20 @@ switched to SQLite's `DELETE` journal mode and checked for adjacent sidecars.
 A live database, WAL, SHM, rollback-journal or other unmanifested SQLite file is
 never opened through or left in the transport.
 
-## Data flow — replica mode
+## Data flow — Republica mode
 
 ```text
 local DB A --backup--> snapshot --curated SQL dump--> gzip --Fernet--> transport
                                                                           |
                                                                           v
-                          replica_root/<node A>/<namespace>.sqlite  <-- decrypt, restore,
+                          republica_root/<node A>/<namespace>.sqlite  <-- decrypt, restore,
                           (read-only, outside the transport)             rebuild FTS
 
 local DB B  ....................... untouched .......................
 ```
 
 The key travels out of band and must live outside the transport; the same applies to
-`replica_root`, since an imported replica holds decrypted foreign data.
+`republica_root`, since an imported replica holds decrypted foreign data.
 
 ## Components
 
@@ -50,8 +73,8 @@ The key travels out of band and must live outside the transport; the same applie
 - `Snapshot`: immutable reference to a database snapshot and its manifest.
 - `MergePolicy`: application extension point.
 - `TimestampMergePolicy`: safe generic baseline for timestamped rows with primary keys.
-- `ReplicaTransit`: adds `publish`, `available` and `import_replica` on the same safety gate.
-- `ReplicaSnapshot` / `ReplicaImport`: results of publication and import.
+- `RepublicaTransit`: adds `publish`, `available`, `import_republica` and sealed envelopes on the same safety gate.
+- `RepublicaSnapshot` / `RepublicaImport` / `Envelope`: results of publication and import.
 - `cli.py`: JSON interface for humans, agents and automations.
 
 ## Default merge semantics
@@ -73,7 +96,7 @@ Manifests and SHA-256 protect against partial transfer and accidental corruption
 They do not establish sender identity. Deployments with an untrusted transport must
 add signatures or an authenticated transport before accepting snapshots.
 
-Replica mode narrows this: Fernet's HMAC also detects deliberate modification, including
+Republica mode narrows this: Fernet's HMAC also detects deliberate modification, including
 the case where the manifest hash was recomputed to match. What it still does not provide is
 *sender identity* — any holder of the shared key can publish a valid snapshot. This is why
 an imported replica stays a separate database and is never merged: content of unproven

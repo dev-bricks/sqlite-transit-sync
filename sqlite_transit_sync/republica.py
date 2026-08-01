@@ -1,17 +1,38 @@
-"""Publish-replica mode: encrypted one-way snapshots for read-only replicas.
+"""Republica — the showcase method: encrypted one-way database showcases.
+
+Each node puts an encrypted *showcase* of its database into a shared file area;
+every other node can look at it, none can change it. Hence the name: a re-publication
+of a database, readable only by whoever holds the key.
 
 This is an additive operating mode next to :class:`~sqlite_transit_sync.core.TransitSync`.
 The difference is intent, not plumbing:
 
-``push``/``pull``   two-way convergence. A remote snapshot is *merged into* the
-                    local database by a :class:`MergePolicy`.
-``publish``/        one-way distribution. A remote snapshot is *materialised beside*
-``import-replica``  the local database as a separate read-only replica and never
-                    touches local rows.
+``push``/``pull``       two-way convergence. A remote snapshot is *merged into* the
+                        local database by a :class:`MergePolicy`.
+``republica-publish``/  one-way distribution. A remote showcase is *materialised beside*
+``republica-import``    the local database as a separate read-only copy and never
+                        touches local rows.
 
-The replica mode exists for the case where nodes want to *read* each other's data
-without agreeing on a merge semantic — and where the transport (a synchronised
-cloud folder, a share, a USB disk) must not see plaintext.
+Republica exists for the case where nodes want to *read* each other's data without
+agreeing on a merge semantic — and where the transport (a synchronised cloud folder,
+a share, a USB disk) must not see plaintext.
+
+**It is a permanent fallback layer, not a stopgap.** Two operating modes are meant to
+coexist: a direct tunnel between machines (fast, converging, needs reachable hosts and a
+trust setup) and Republica over any file area (slow, one-way, needs almost nothing).
+When one fails — a host is offline, a tunnel is down, a key rotation is pending, a
+network is hostile — the other still carries. Setting Republica up "for now" and letting
+it rot defeats the point; the whole value is that it works on the day the other path
+does not.
+
+**Setup cost is one key transfer.** The shared key must reach the other machines through
+some channel that is not the transport itself: an existing encrypted tunnel, a password
+manager, a USB stick, a phone read-out. Once. After that a plain shared folder — even an
+untrusted one — is enough forever.
+
+Besides databases, the same channel and key carry a :func:`sealed envelope
+<RepublicaTransit.envelope_send>`: a single encrypted file that arrives as a file and
+never enters a database (ADR-009).
 
 Payload pipeline
 ----------------
@@ -66,8 +87,11 @@ from .core import (
     _utc_token,
 )
 
-REPLICA_SUFFIX = ".sqlite-replica"
-REPLICA_PROTOCOL_VERSION = 1
+REPUBLICA_SUFFIX = ".republica"
+REPUBLICA_PROTOCOL_VERSION = 1
+ENVELOPE_SUFFIX = ".envelope"
+ENVELOPE_PROTOCOL_VERSION = 1
+_SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 # Shadow tables of FTS3/4/5 virtual tables. They are an implementation detail of
 # the index and are rebuilt on import, so they never travel: on a real database
@@ -97,7 +121,7 @@ _SYNCED_FOLDER_MARKERS = ("onedrive", "dropbox", "google drive", "googledrive", 
 
 
 @dataclass(frozen=True, slots=True)
-class ReplicaSnapshot:
+class RepublicaSnapshot:
     """A published, encrypted snapshot and its plaintext manifest."""
 
     path: Path
@@ -117,8 +141,44 @@ class ReplicaSnapshot:
         return value
 
 
+@dataclass(frozen=True, slots=True)
+class Envelope:
+    """A sealed single file waiting in the transit."""
+
+    path: Path
+    manifest_path: Path
+    node_id: str
+    filename: str
+    label: str
+    created_at: str
+    sha256: str
+    size: int
+
+    def as_dict(self) -> dict[str, Any]:
+        value = asdict(self)
+        value["path"] = str(self.path)
+        value["manifest_path"] = str(self.manifest_path)
+        return value
+
+
 @dataclass(slots=True)
-class ReplicaImport:
+class EnvelopeReceipt:
+    """Result of unsealing one envelope into a local directory."""
+
+    source_node: str
+    filename: str
+    label: str
+    created_at: str
+    written_to: str
+    size: int
+    removed_from_transit: bool
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class RepublicaImport:
     """Result of materialising one remote snapshot as a local replica."""
 
     source_node: str
@@ -242,7 +302,7 @@ def generate_key() -> bytes:
     return Fernet.generate_key()
 
 
-class ReplicaTransit(TransitSync):
+class RepublicaTransit(TransitSync):
     """Publish encrypted snapshots and import foreign ones as read-only replicas.
 
     Inherits the snapshot safety apparatus of :class:`TransitSync` — journal
@@ -258,15 +318,15 @@ class ReplicaTransit(TransitSync):
     # -- paths -----------------------------------------------------------
 
     @property
-    def replica_root(self) -> Path:
-        return self.config.replica_root
+    def republica_root(self) -> Path:
+        return self.config.republica_root
 
     def _own_transit(self) -> Path:
         """Publication target: one directory per node, so hosts never interleave."""
         return self.config.transit / self.config.node_id
 
-    def _replica_path(self, source_node: str) -> Path:
-        return self.replica_root / source_node / f"{self.config.namespace}.sqlite"
+    def _republica_path(self, source_node: str) -> Path:
+        return self.republica_root / source_node / f"{self.config.namespace}.sqlite"
 
     def _assert_key_outside_transport(self) -> None:
         """A key inside the transport protects nothing — fail before publishing.
@@ -285,18 +345,16 @@ class ReplicaTransit(TransitSync):
             )
         if self.config.allow_key_in_synced_folder:
             return
-        lowered = str(key_file).lower()
-        for marker in _SYNCED_FOLDER_MARKERS:
-            if marker in lowered:
-                raise SyncError(
-                    f"The encryption key appears to be inside a synchronised folder "
-                    f"({marker}): {key_file}. Keep it on local disk only, or set "
-                    "'allow_key_in_synced_folder' if this detection is wrong."
-                )
+        if self._looks_synced(key_file):
+            raise SyncError(
+                f"The encryption key appears to be inside a synchronised folder: "
+                f"{key_file}. Keep it on local disk only, or set "
+                "'allow_key_in_synced_folder' if this detection is wrong."
+            )
 
     # -- publish ---------------------------------------------------------
 
-    def publish(self) -> ReplicaSnapshot:
+    def publish(self) -> RepublicaSnapshot:
         """Publish a consistent, redacted, scanned, encrypted snapshot."""
         if not self.config.database.is_file():
             raise SyncError(f"Live database not found: {self.config.database}")
@@ -306,7 +364,7 @@ class ReplicaTransit(TransitSync):
         target_dir = self._own_transit()
         target_dir.mkdir(parents=True, exist_ok=True)
         final_path = target_dir / (
-            f"{self.config.namespace}__{self.config.node_id}__{created_at}{REPLICA_SUFFIX}"
+            f"{self.config.namespace}__{self.config.node_id}__{created_at}{REPUBLICA_SUFFIX}"
         )
         manifest_path = final_path.with_suffix(final_path.suffix + ".json")
 
@@ -347,7 +405,7 @@ class ReplicaTransit(TransitSync):
 
         manifest = {
             "protocol": PROTOCOL_VERSION,
-            "replica_protocol": REPLICA_PROTOCOL_VERSION,
+            "republica_protocol": REPUBLICA_PROTOCOL_VERSION,
             "mode": "replica",
             "namespace": self.config.namespace,
             "node_id": self.config.node_id,
@@ -374,7 +432,7 @@ class ReplicaTransit(TransitSync):
             self._cleanup(None, final_path, manifest_path)
             raise
 
-        return ReplicaSnapshot(
+        return RepublicaSnapshot(
             path=final_path,
             manifest_path=manifest_path,
             node_id=self.config.node_id,
@@ -424,10 +482,10 @@ class ReplicaTransit(TransitSync):
         found: list[dict[str, Any]] = []
         if not self.config.transit.is_dir():
             return found
-        pattern = f"{self.config.namespace}__*__*{REPLICA_SUFFIX}.json"
+        pattern = f"{self.config.namespace}__*__*{REPUBLICA_SUFFIX}.json"
         for manifest_path in sorted(self.config.transit.glob(f"*/{pattern}")):
             try:
-                manifest = self._read_replica_manifest(manifest_path)
+                manifest = self._read_republica_manifest(manifest_path)
             except SyncError:
                 continue  # a foreign or damaged manifest must not stop discovery
             if manifest["node_id"] == self.config.node_id:
@@ -435,13 +493,13 @@ class ReplicaTransit(TransitSync):
             found.append(manifest)
         return sorted(found, key=lambda item: (item["node_id"], item["created_at"]))
 
-    def _read_replica_manifest(self, manifest_path: Path) -> dict[str, Any]:
+    def _read_republica_manifest(self, manifest_path: Path) -> dict[str, Any]:
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as error:
             raise SyncError(f"Invalid replica manifest {manifest_path}: {error}") from error
         required = {
-            "replica_protocol",
+            "republica_protocol",
             "namespace",
             "node_id",
             "created_at",
@@ -454,7 +512,7 @@ class ReplicaTransit(TransitSync):
             raise SyncError(f"Incomplete replica manifest: {manifest_path}")
         if manifest.get("mode") != "replica":
             raise SyncError(f"Not a replica manifest: {manifest_path}")
-        if manifest["replica_protocol"] != REPLICA_PROTOCOL_VERSION:
+        if manifest["republica_protocol"] != REPUBLICA_PROTOCOL_VERSION:
             raise SyncError(f"Unsupported replica protocol in {manifest_path}")
         if manifest["namespace"] != self.config.namespace:
             raise SyncError(f"Wrong namespace in {manifest_path}")
@@ -466,11 +524,11 @@ class ReplicaTransit(TransitSync):
         manifest["_manifest_path"] = str(manifest_path)
         return manifest
 
-    def import_replica(self, node_id: str | None = None) -> list[ReplicaImport]:
+    def import_republica(self, node_id: str | None = None) -> list[RepublicaImport]:
         """Materialise foreign snapshots as separate read-only replicas.
 
         Never merges: each source node gets its own database file under
-        ``replica_root``. The local database is not opened at all.
+        ``republica_root``. The local database is not opened at all.
         """
         cipher = _load_fernet(self.config.key_file)
         newest: dict[str, dict[str, Any]] = {}
@@ -481,12 +539,12 @@ class ReplicaTransit(TransitSync):
             if current is None or manifest["created_at"] > current["created_at"]:
                 newest[manifest["node_id"]] = manifest
 
-        results: list[ReplicaImport] = []
+        results: list[RepublicaImport] = []
         for source_node, manifest in sorted(newest.items()):
             results.append(self._import_one(cipher, manifest, source_node))
         return results
 
-    def _import_one(self, cipher: Any, manifest: dict[str, Any], source_node: str) -> ReplicaImport:
+    def _import_one(self, cipher: Any, manifest: dict[str, Any], source_node: str) -> RepublicaImport:
         snapshot_path = Path(manifest["_path"])
         if not snapshot_path.is_file():
             raise SyncError(f"Replica snapshot missing: {snapshot_path}")
@@ -509,7 +567,7 @@ class ReplicaTransit(TransitSync):
                 "modified or was encrypted with a different key. Nothing was imported."
             ) from error
 
-        target = self._replica_path(source_node)
+        target = self._republica_path(source_node)
         target.parent.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix=".import-", dir=target.parent))
         building = staging / "replica.db"
@@ -549,7 +607,7 @@ class ReplicaTransit(TransitSync):
         finally:
             self._remove_tree(staging)
 
-        return ReplicaImport(
+        return RepublicaImport(
             source_node=source_node,
             namespace=self.config.namespace,
             created_at=manifest["created_at"],
@@ -559,7 +617,240 @@ class ReplicaTransit(TransitSync):
             rebuilt_indexes=rebuilt,
         )
 
+    # -- sealed envelope -------------------------------------------------
+    #
+    # Same channel, same key, deliberately different rules. An envelope carries a
+    # credential *on purpose*, so two things are inverted compared to a showcase:
+    # the credential scan does not apply (it would block the payload it is meant to
+    # move), and the plaintext is written as a file and never into a database.
+
+    def envelope_send(
+        self, source: Path, *, recipient: str | None = None, label: str | None = None
+    ) -> Envelope:
+        """Seal one file into the transit.
+
+        Intended for the case where two machines share no other secure channel: the
+        file is encrypted here and only ever decrypted on a machine holding the key.
+        Keep envelopes small and few — this is a courier, not a file sync.
+        """
+        cipher = _load_fernet(self.config.key_file)
+        source = Path(source).expanduser().resolve()
+        if not source.is_file():
+            raise SyncError(f"File to seal not found: {source}")
+        transit = self.config.transit
+        if source == transit or transit in source.parents:
+            raise SyncError(
+                f"Refusing to seal a file that already lies in the transit: {source}"
+            )
+
+        created_at = _utc_token()
+        filename = _safe_filename(source.name)
+        tag = _safe_identifier(label or source.stem, "envelope")
+        target_dir = self._own_transit()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        final_path = target_dir / f"{tag}__{self.config.node_id}__{created_at}{ENVELOPE_SUFFIX}"
+        manifest_path = final_path.with_suffix(final_path.suffix + ".json")
+
+        payload = source.read_bytes()
+        payload_sha256 = _sha256_bytes(payload)
+        partial = final_path.with_name(f".{final_path.name}.partial")
+        try:
+            partial.write_bytes(cipher.encrypt(payload))
+            digest = _sha256(partial)
+            size = partial.stat().st_size
+            os.replace(partial, final_path)
+        except Exception:
+            partial.unlink(missing_ok=True)
+            final_path.unlink(missing_ok=True)
+            raise
+        finally:
+            del payload
+
+        manifest = {
+            "protocol": PROTOCOL_VERSION,
+            "envelope_protocol": ENVELOPE_PROTOCOL_VERSION,
+            "mode": "envelope",
+            "namespace": self.config.namespace,
+            "node_id": self.config.node_id,
+            "created_at": created_at,
+            "envelope": final_path.name,
+            # Basename only - a manifest travels in the clear and must not disclose
+            # where the secret lives on the sending machine.
+            "filename": filename,
+            "label": tag,
+            "recipient": _safe_identifier(recipient, "any") if recipient else "",
+            "encryption": "fernet",
+            "sha256": digest,
+            "size": size,
+            "payload_sha256": payload_sha256,
+        }
+        try:
+            _atomic_json_write(manifest_path, manifest)
+        except Exception:
+            final_path.unlink(missing_ok=True)
+            _remove_manifest_artifacts(manifest_path)
+            raise
+
+        return Envelope(
+            path=final_path,
+            manifest_path=manifest_path,
+            node_id=self.config.node_id,
+            filename=filename,
+            label=tag,
+            created_at=created_at,
+            sha256=digest,
+            size=size,
+        )
+
+    def envelopes(self) -> list[dict[str, Any]]:
+        """List foreign envelopes waiting in the transit."""
+        found: list[dict[str, Any]] = []
+        if not self.config.transit.is_dir():
+            return found
+        for manifest_path in sorted(self.config.transit.glob(f"*/*{ENVELOPE_SUFFIX}.json")):
+            try:
+                manifest = self._read_envelope_manifest(manifest_path)
+            except SyncError:
+                continue
+            if manifest["node_id"] == self.config.node_id:
+                continue
+            found.append(manifest)
+        return sorted(found, key=lambda item: (item["node_id"], item["created_at"]))
+
+    def _read_envelope_manifest(self, manifest_path: Path) -> dict[str, Any]:
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise SyncError(f"Invalid envelope manifest {manifest_path}: {error}") from error
+        required = {
+            "envelope_protocol",
+            "node_id",
+            "created_at",
+            "envelope",
+            "filename",
+            "sha256",
+            "size",
+            "payload_sha256",
+        }
+        if not required.issubset(manifest):
+            raise SyncError(f"Incomplete envelope manifest: {manifest_path}")
+        if manifest.get("mode") != "envelope":
+            raise SyncError(f"Not an envelope manifest: {manifest_path}")
+        if manifest["envelope_protocol"] != ENVELOPE_PROTOCOL_VERSION:
+            raise SyncError(f"Unsupported envelope protocol in {manifest_path}")
+        envelope_path = manifest_path.parent / manifest["envelope"]
+        if envelope_path.parent.resolve().parent != self.config.transit.resolve():
+            raise SyncError(f"Envelope escapes transit directory: {envelope_path}")
+        manifest["node_id"] = _safe_identifier(manifest["node_id"], "node")
+        manifest["_path"] = str(envelope_path)
+        manifest["_manifest_path"] = str(manifest_path)
+        return manifest
+
+    def envelope_receive(
+        self, into: Path, *, node_id: str | None = None, keep: bool = False
+    ) -> list[EnvelopeReceipt]:
+        """Unseal envelopes into a directory, as files.
+
+        The plaintext is written to disk and **never** into a database: a credential
+        in a database would be copied onward by every backup, index and sync that
+        touches it. Only the location of a secret belongs in notes — the secret itself
+        belongs in a file with narrow permissions.
+
+        By default the envelope is removed from the transit afterwards, so a secret
+        does not keep lying in a shared folder once it has arrived.
+        """
+        cipher = _load_fernet(self.config.key_file)
+        into = Path(into).expanduser().resolve()
+        transit = self.config.transit
+        if into == transit or transit in into.parents:
+            raise SyncError(
+                f"Refusing to unseal into the transit directory: {into}. The decrypted "
+                "file would be redistributed in the clear."
+            )
+        if self._looks_synced(into) and not self.config.allow_key_in_synced_folder:
+            raise SyncError(
+                f"Refusing to unseal into what looks like a synchronised folder: {into}. "
+                "Choose a local directory, or set 'allow_key_in_synced_folder' if this "
+                "detection is wrong."
+            )
+        if into.exists() and not into.is_dir():
+            raise SyncError(f"Unseal target is not a directory: {into}")
+        into.mkdir(parents=True, exist_ok=True)
+
+        try:
+            from cryptography.fernet import InvalidToken
+        except ModuleNotFoundError as error:  # pragma: no cover - depends on environment
+            raise SyncError("Sealed envelopes need the 'cryptography' package.") from error
+
+        receipts: list[EnvelopeReceipt] = []
+        for manifest in self.envelopes():
+            if node_id and manifest["node_id"] != node_id:
+                continue
+            envelope_path = Path(manifest["_path"])
+            if not envelope_path.is_file():
+                raise SyncError(f"Envelope missing: {envelope_path}")
+            if envelope_path.stat().st_size != int(manifest["size"]):
+                raise SyncError(f"Envelope size mismatch: {envelope_path.name}")
+            if _sha256(envelope_path) != manifest["sha256"]:
+                raise SyncError(f"Envelope checksum mismatch: {envelope_path.name}")
+            try:
+                payload = cipher.decrypt(envelope_path.read_bytes())
+            except InvalidToken as error:
+                raise SyncError(
+                    f"Envelope decryption failed for {envelope_path.name}: it was modified "
+                    "or sealed with a different key. Nothing was written."
+                ) from error
+            if _sha256_bytes(payload) != manifest["payload_sha256"]:
+                raise SyncError(
+                    f"Envelope payload hash mismatch for {envelope_path.name}. Nothing was written."
+                )
+
+            # The filename comes from another machine: re-sanitise it here rather than
+            # trusting the sender, so a crafted manifest cannot escape the target folder.
+            filename = _safe_filename(Path(manifest["filename"]).name)
+            target = into / f"{manifest['node_id']}__{filename}"
+            temporary = into / f".{target.name}.partial"
+            try:
+                temporary.write_bytes(payload)
+                try:
+                    temporary.chmod(0o600)
+                except OSError:
+                    pass
+                os.replace(temporary, target)
+            except Exception:
+                temporary.unlink(missing_ok=True)
+                raise
+            finally:
+                del payload
+
+            removed = False
+            if not keep:
+                try:
+                    envelope_path.unlink(missing_ok=True)
+                    Path(manifest["_manifest_path"]).unlink(missing_ok=True)
+                    removed = True
+                except OSError:
+                    removed = False
+
+            receipts.append(
+                EnvelopeReceipt(
+                    source_node=manifest["node_id"],
+                    filename=filename,
+                    label=manifest.get("label", ""),
+                    created_at=manifest["created_at"],
+                    written_to=str(target),
+                    size=target.stat().st_size,
+                    removed_from_transit=removed,
+                )
+            )
+        return receipts
+
     # -- housekeeping ----------------------------------------------------
+
+    @staticmethod
+    def _looks_synced(path: Path) -> bool:
+        lowered = str(path).lower()
+        return any(marker in lowered for marker in _SYNCED_FOLDER_MARKERS)
 
     @staticmethod
     def _remove_tree(directory: Path) -> None:
@@ -592,6 +883,19 @@ class ReplicaTransit(TransitSync):
 
 def _sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _safe_filename(value: str, fallback: str = "sealed-file") -> str:
+    """Reduce a name to a plain filename.
+
+    Applied on send *and* again on receive: the second machine must not trust a
+    filename that travelled through a shared folder, or a crafted manifest could
+    write outside the target directory.
+    """
+    cleaned = _SAFE_FILENAME.sub("-", Path(value).name).strip("-. ")
+    while ".." in cleaned:
+        cleaned = cleaned.replace("..", ".")
+    return cleaned[:120] or fallback
 
 
 def _count_rows(connection: sqlite3.Connection) -> int:

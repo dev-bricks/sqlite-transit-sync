@@ -10,7 +10,7 @@
 [![Ecosystem: dev-bricks](https://img.shields.io/badge/Ecosystem-dev--bricks-blue.svg)](https://github.com/dev-bricks)
 [![Umbrella: open-bricks](https://img.shields.io/badge/Umbrella-open--bricks-purple.svg)](https://github.com/open-bricks)
 [![Architecture](https://img.shields.io/badge/architecture-local--first-success.svg)](#part-of-the-ellmos-stack-family)
-[![Tests](https://img.shields.io/badge/tests-44%2F44%20passed-brightgreen.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-55%2F55%20passed-brightgreen.svg)](#tests)
 [![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
 
 > [!NOTE]
@@ -77,10 +77,10 @@ application-selectable merge policies.
   contains credential-shaped values (on by default; reports `table.column`, never
   the value itself);
 - custom `MergePolicy` support for domain rules, tombstones or CRDTs;
-- an optional [publish-replica mode](#publish-replica-mode) that distributes a database
-  one way as an encrypted payload and materialises it as a separate read-only replica,
+- an optional [Republica showcase mode](#republica--the-showcase-method) that distributes a database
+  one way as an encrypted payload and materialises it as a separate read-only showcase,
   instead of merging it;
-- dependency-free Python API and JSON CLI (replica mode adds `cryptography`).
+- dependency-free Python API and JSON CLI (Republica mode adds `cryptography`).
 
 ## Install
 
@@ -166,8 +166,8 @@ config_sha256 = hashlib.sha256(payload).hexdigest()
 | `secret_scan_skip_tables` | `[]` | Tables the scan ignores — use for a single noisy table instead of disabling the scan |
 | `secret_scan_extra_patterns` | `[]` | Additional regexes, on top of the trigger file |
 | `secret_patterns_file` | `null` (bundled file) | Path to your own trigger file; **replaces** the built-in patterns |
-| `key_file` | `null`, else `$SQLITE_TRANSIT_SYNC_KEY_FILE` | Fernet key for replica mode; must stay outside the transit |
-| `replica_root` | `~/.transit-replicas` | Where imported replicas are written; must stay outside the transit |
+| `key_file` | `null`, else `$SQLITE_TRANSIT_SYNC_KEY_FILE` | Fernet key for Republica mode; must stay outside the transit |
+| `republica_root` | `~/.republica` | Where imported showcases are written; must stay outside the transit |
 | `allow_key_in_synced_folder` | `false` | Waives the check that refuses a key inside a cloud-sync folder |
 
 The `state` default in this table applies when a JSON configuration is loaded
@@ -225,33 +225,58 @@ a scanner with a high false-positive rate gets switched off, which protects noth
 Treat a clean scan as "no known pattern matched", never as "this snapshot is free of
 secrets".
 
-## Publish-replica mode
+## Republica — the showcase method
 
-`push`/`pull` makes two databases converge. Sometimes that is not what you want: you want
-to *read* what another node knows, without merging any of it into your own rows — and the
-transport is a synchronised cloud folder that should not see your content in the clear.
+Each machine puts an **encrypted showcase** of its database into a shared file area. Every
+other machine can look at it; none can change it. Hence the name — a re-publication of a
+database, readable only by whoever holds the key.
 
-That is `publish` / `import-replica`. The import writes a **separate read-only database per
-source node** and never opens your local one:
+Use it when `push`/`pull` does not fit: you want to *read* what another node knows without
+merging it into your rows, or the only thing the machines share is a folder — no server, no
+open ports, no trust setup — and that folder must not see your content in the clear.
+
+### Two modes, deliberately redundant
+
+Republica is **not a stopgap until a proper tunnel exists.** It is the second of two modes
+meant to run side by side, so that a failure in one does not stop the other:
+
+| Failure | Direct sync (`push`/`pull`) | Republica |
+|---|---|---|
+| A machine is asleep or offline | stalls (no peer) | keeps working — drop off now, pick up later |
+| VPN/SSH down, network blocks the tunnel | stalls | keeps working over the file area |
+| Key rotation or trust setup pending | stalls | keeps working with the shared key |
+| Shared folder broken, full or desynced | keeps working | stalls |
+| No merge policy agreed for a dataset | not applicable | keeps working — nothing is merged |
+
+The whole value is that it works on the day the other path does not, so keep it configured
+and exercised even while the direct path is healthy.
+
+### Setup cost: one key transfer
+
+The shared key must reach the other machines through **some channel that is not the
+transport itself** — an existing encrypted tunnel, a password manager, a USB stick, reading
+it out over the phone. Once. After that a plain shared folder is enough, forever, even one
+you do not trust.
 
 ```text
-replica_root/
-  laptop/my-app.sqlite      <- read-only copy of laptop's database
-  workstation/my-app.sqlite <- read-only copy of workstation's database
+republica_root/
+  laptop/my-app.sqlite      <- read-only showcase of laptop's database
+  workstation/my-app.sqlite <- read-only showcase of workstation's database
 ```
 
 ```bash
-# once per key, on local disk - never inside the transit, never in a synced folder
-sqlite-transit-sync keygen --key-file ~/.keys/replica.key
+# Once per key, on local disk - never inside the transit, never in a synced folder.
+# Then copy this file to the other machines out of band; do NOT run keygen there.
+sqlite-transit-sync keygen --key-file ~/.keys/republica.key
 
 sqlite-transit-sync init --config node.json \
   --database ./app.db --transit ./shared-transit \
   --node-id laptop --namespace my-app \
-  --key-file ~/.keys/replica.key
+  --key-file ~/.keys/republica.key
 
-sqlite-transit-sync publish        --config node.json   # encrypt and publish
-sqlite-transit-sync replicas       --config node.json   # what other nodes offer
-sqlite-transit-sync import-replica --config node.json   # materialise them locally
+sqlite-transit-sync republica-publish --config node.json   # encrypt and publish
+sqlite-transit-sync republica-list    --config node.json   # what other nodes offer
+sqlite-transit-sync republica-import  --config node.json   # materialise them locally
 ```
 
 Requires the optional cipher: `pip install 'sqlite-transit-sync[crypto]'`.
@@ -269,12 +294,34 @@ modification even when the manifest hash was recomputed to match.
 can publish a valid snapshot. That is exactly why a replica is kept separate and never
 merged. Keep the key out of the transport: a key inside the transit directory is refused,
 and so is one in a folder that looks synchronised (override with
-`allow_key_in_synced_folder`). The same rule applies to `replica_root` — a decrypted
+`allow_key_in_synced_folder`). The same rule applies to `republica_root` — a decrypted
 replica inside the transit would be redistributed in the clear.
 
 **Limit:** a full-text index without its own content (`content=''`) cannot be rebuilt,
 because there is nothing to rebuild it from. Such tables are reported in the manifest as
 `contentless_fts` instead of arriving silently empty.
+
+### Sealed envelope: one file, same channel, never a database
+
+The bootstrap problem: two machines share no secure channel *yet*, and that is exactly why a
+credential has to cross. The same key and the same folder can carry a single encrypted file.
+
+```bash
+sqlite-transit-sync envelope-send    --config node.json --file ./api-token.txt --label api-token
+sqlite-transit-sync envelope-receive --config node.json --into ~/credentials
+```
+
+The file arrives **as a file** (mode `0600`), named `<source-node>__<filename>`, and never
+enters a database — a secret in a database gets copied onward by every backup, index and
+sync that touches it. Notes should record where a secret lives, never the secret.
+
+Two showcase rules are inverted on purpose: the **credential scan does not apply** (it would
+block the very payload being moved), and the envelope is **removed from the transit** after
+receipt, so a secret does not linger in a shared folder. Unsealing into the transit or into a
+folder that looks cloud-synced is refused, and the filename is re-sanitised on arrival so a
+crafted manifest cannot write outside the target directory.
+
+This is a courier, not a password manager and not file sync — keep envelopes few and small.
 
 ## This is not a secrets manager
 
