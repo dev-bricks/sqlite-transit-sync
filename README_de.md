@@ -10,7 +10,7 @@
 [![Ecosystem: dev-bricks](https://img.shields.io/badge/Ecosystem-dev--bricks-blue.svg)](https://github.com/dev-bricks)
 [![Umbrella: open-bricks](https://img.shields.io/badge/Umbrella-open--bricks-purple.svg)](https://github.com/open-bricks)
 [![Architecture](https://img.shields.io/badge/architecture-local--first-success.svg)](#teil-der-ellmos-stack-familie)
-[![Tests](https://img.shields.io/badge/tests-26%2F26%20passed-brightgreen.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-44%2F44%20passed-brightgreen.svg)](#tests)
 [![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
 
 > [!NOTE]
@@ -79,7 +79,11 @@ geprüfte Snapshots mit von der Anwendung wählbaren Merge-Policies.
   Snapshot weiterhin zugangsdatenähnliche Werte enthält (standardmäßig aktiv;
   gemeldet wird `table.column`, niemals der Wert selbst);
 - eigene `MergePolicy` für fachliche Regeln, Tombstones oder CRDTs;
-- Python-API und JSON-CLI ohne zusätzliche Laufzeitabhängigkeiten.
+- optionaler [Publish-Replica-Modus](#publish-replica-modus), der eine Datenbank
+  einseitig als verschlüsselte Nutzlast verteilt und als eigenständige,
+  schreibgeschützte Replica materialisiert, statt sie zu mergen;
+- Python-API und JSON-CLI ohne zusätzliche Laufzeitabhängigkeiten (der Replica-Modus
+  ergänzt `cryptography`).
 
 ## Installation
 
@@ -167,6 +171,9 @@ config_sha256 = hashlib.sha256(payload).hexdigest()
 | `secret_scan_skip_tables` | `[]` | Tabellen, die der Scan auslässt; bei einer einzelnen störenden Tabelle besser als die vollständige Abschaltung |
 | `secret_scan_extra_patterns` | `[]` | Zusätzliche reguläre Ausdrücke, ergänzend zur Trigger-Datei |
 | `secret_patterns_file` | `null` (mitgelieferte Datei) | Pfad zu einer eigenen Trigger-Datei; **ersetzt** die eingebauten Muster |
+| `key_file` | `null`, sonst `$SQLITE_TRANSIT_SYNC_KEY_FILE` | Fernet-Schlüssel für den Replica-Modus; muss außerhalb des Transits liegen |
+| `replica_root` | `~/.transit-replicas` | Ablageort importierter Replicas; muss außerhalb des Transits liegen |
+| `allow_key_in_synced_folder` | `false` | Hebt die Prüfung auf, die einen Schlüssel in einem Cloud-Ordner ablehnt |
 
 Der `state`-Standardwert in dieser Tabelle gilt, wenn eine JSON-Konfiguration ohne
 diesen Schlüssel geladen wird. `sqlite-transit-sync init` schreibt ohne `--state`
@@ -224,6 +231,58 @@ diese legitime Datenbankinhalte sind. Ein Scanner mit vielen Fehlalarmen wird
 abgeschaltet und schützt dann gar nicht mehr. Ein sauberer Scan bedeutet „kein
 bekanntes Muster gefunden“, niemals „dieser Snapshot enthält garantiert keine
 Secrets“.
+
+## Publish-Replica-Modus
+
+`push`/`pull` gleicht zwei Datenbanken einander an. Manchmal ist genau das nicht gewollt:
+Man möchte *lesen*, was ein anderer Knoten weiß, ohne irgendetwas davon in die eigenen
+Zeilen einzurechnen – und der Transportweg ist ein synchronisierter Cloud-Ordner, der die
+Inhalte nicht im Klartext sehen soll.
+
+Dafür gibt es `publish` / `import-replica`. Der Import legt **pro Quellknoten eine eigene,
+schreibgeschützte Datenbank** an und öffnet die lokale Datenbank überhaupt nicht:
+
+```text
+replica_root/
+  laptop/my-app.sqlite      <- schreibgeschützte Kopie der Laptop-Datenbank
+  workstation/my-app.sqlite <- schreibgeschützte Kopie der Workstation-Datenbank
+```
+
+```bash
+# einmalig, auf lokaler Platte - nie im Transit, nie in einem Cloud-Ordner
+sqlite-transit-sync keygen --key-file ~/.keys/replica.key
+
+sqlite-transit-sync init --config node.json \
+  --database ./app.db --transit ./shared-transit \
+  --node-id laptop --namespace my-app \
+  --key-file ~/.keys/replica.key
+
+sqlite-transit-sync publish        --config node.json   # verschlüsseln und veröffentlichen
+sqlite-transit-sync replicas       --config node.json   # was andere Knoten anbieten
+sqlite-transit-sync import-replica --config node.json   # lokal materialisieren
+```
+
+Benötigt die optionale Verschlüsselung: `pip install 'sqlite-transit-sync[crypto]'`.
+
+**Übertragen wird** keine Datenbankdatei, sondern ein kuratierter SQL-Dump, gzip-komprimiert
+und Fernet-verschlüsselt. Bei einer realen 53,6-MB-Wissensdatenbank sind das 11,0 MB im
+Transit, weil die Interna des Volltextindex beim Import neu aufgebaut statt mitgeschickt
+werden (35.370 von 49.636 Dump-Anweisungen). Die Veröffentlichung durchläuft dieselbe
+Prüfkette wie ein Merge-Snapshot: Redaktion, Credential-Scan, `quick_check`, Manifest.
+
+**Was das schützt:** Der Transport sieht nur Chiffretext, und Fernets HMAC erkennt eine
+absichtliche Änderung selbst dann, wenn der Manifest-Hash passend nachgerechnet wurde.
+
+**Was nicht:** Fernet authentifiziert den *Schlüssel*, nicht den *Absender* – wer ihn
+besitzt, kann einen gültigen Snapshot veröffentlichen. Genau deshalb bleibt eine Replica
+getrennt und wird nie gemergt. Der Schlüssel gehört nicht in den Transportweg: ein Schlüssel
+im Transitverzeichnis wird abgelehnt, ebenso einer in einem erkennbar synchronisierten
+Ordner (abschaltbar über `allow_key_in_synced_folder`). Dasselbe gilt für `replica_root` –
+eine entschlüsselte Replica im Transit würde im Klartext weiterverteilt.
+
+**Grenze:** Ein Volltextindex ohne eigenen Inhalt (`content=''`) lässt sich nicht neu
+aufbauen, weil die Quelle dafür fehlt. Solche Tabellen meldet das Manifest unter
+`contentless_fts`, statt still leer anzukommen.
 
 ## Das hier ist kein Passwort-Manager
 

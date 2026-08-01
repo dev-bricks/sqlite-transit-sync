@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sqlite-transit-sync"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local-first SQLite synchronization through verified snapshots and configurable row-level merge policies."
 readme = "README.md"
 license = "MIT"
@@ -20,7 +20,10 @@ Issues = "https://github.com/dev-bricks/sqlite-transit-sync/issues"
 Documentation = "https://github.com/dev-bricks/sqlite-transit-sync/blob/main/README.md"
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "cryptography>=42"]
+# The core stays dependency free on purpose: push/pull needs nothing but the standard
+# library. Only publish-replica mode encrypts, so its cipher is opt-in.
+crypto = ["cryptography>=42"]
 
 [project.scripts]
 sqlite-transit-sync = "sqlite_transit_sync.cli:main"

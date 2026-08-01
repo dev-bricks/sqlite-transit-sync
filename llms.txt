@@ -3,13 +3,13 @@
 > Local-first SQLite synchronization through verified transit snapshots and configurable row-level merge policies. Extracted from the BACH ProSync architecture for standalone, zero-dependency Python projects.
 
 - Last-checked: 2026-08-01
-- Version: 0.2.0
+- Version: 0.3.0
 - Architecture: Local-First / Zero-Dependency / Snapshot-based Transit
 - Module Family: `dev-bricks/sync-master` companion (`sync.database`)
 
 ## System Overview
 
-`sqlite-transit-sync` is a Python 3.10+ zero-dependency library and CLI for synchronizing local SQLite databases across untrusted or asynchronous file transports (shared folders, object-store mounts, removable drives, or sync-master yards). Verified 26/26 passing test suite on 2026-08-01.
+`sqlite-transit-sync` is a Python 3.10+ library (zero dependencies for merge mode; the optional publish-replica mode adds `cryptography`) and CLI for synchronizing local SQLite databases across untrusted or asynchronous file transports (shared folders, object-store mounts, removable drives, or sync-master yards). Verified 44/44 passing test suite on 2026-08-01.
 
 It avoids live SQLite database locking over file sync by using:
 1. Online consistent snapshots via SQLite Backup API (`sqlite3.Connection.backup`).
@@ -20,7 +20,7 @@ It avoids live SQLite database locking over file sync by using:
 
 ## Key Features
 
-- **Zero External Dependencies**: Standard library Python 3.10+ only.
+- **Zero External Dependencies (core)**: Standard library Python 3.10+ only for `push`/`pull`. The optional publish-replica mode adds `cryptography` via `pip install 'sqlite-transit-sync[crypto]'`.
 - **Atomic & Safe Transit**: Never syncs live SQLite files directly. Uses isolated snapshot zones.
 - **Configurable Merge Policies**: Built-in `LastWriteWinsPolicy` and support for custom domain `MergePolicy` implementations (tombstones, CRDTs).
 - **Data Privacy & Exclusion**: Exclude sensitive tables from transit snapshots with post-delete `VACUUM`.
@@ -52,6 +52,30 @@ sqlite-transit-sync status --config node.json
 # Verify integrity of local database and transit manifests
 sqlite-transit-sync verify --config node.json
 ```
+
+### Publish-replica mode (one-way, encrypted; requires `[crypto]` extra)
+
+Distributes a database instead of converging two. `import-replica` writes a separate
+read-only database per source node under `replica_root` and never touches the local one.
+
+```bash
+# Generate the shared Fernet key - on local disk, never inside the transit
+sqlite-transit-sync keygen --key-file ~/.keys/replica.key
+
+# Publish: backup -> curated SQL dump -> gzip -> Fernet -> transit/<node>/
+sqlite-transit-sync publish --config node.json
+
+# List foreign replica snapshots offered in the transit
+sqlite-transit-sync replicas --config node.json
+
+# Decrypt, restore and rebuild FTS into replica_root/<source-node>/<namespace>.sqlite
+sqlite-transit-sync import-replica --config node.json [--node <source>]
+```
+
+Config keys: `key_file`, `replica_root`, `allow_key_in_synced_folder`.
+Guarantees: content is never in the clear in transit; Fernet HMAC detects deliberate
+modification even with a recomputed manifest hash; an imported replica is never merged.
+Limit: Fernet authenticates the key, not the sender — node identity is out of scope.
 
 ## Python API Usage
 

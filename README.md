@@ -10,7 +10,7 @@
 [![Ecosystem: dev-bricks](https://img.shields.io/badge/Ecosystem-dev--bricks-blue.svg)](https://github.com/dev-bricks)
 [![Umbrella: open-bricks](https://img.shields.io/badge/Umbrella-open--bricks-purple.svg)](https://github.com/open-bricks)
 [![Architecture](https://img.shields.io/badge/architecture-local--first-success.svg)](#part-of-the-ellmos-stack-family)
-[![Tests](https://img.shields.io/badge/tests-26%2F26%20passed-brightgreen.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-44%2F44%20passed-brightgreen.svg)](#tests)
 [![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
 
 > [!NOTE]
@@ -77,7 +77,10 @@ application-selectable merge policies.
   contains credential-shaped values (on by default; reports `table.column`, never
   the value itself);
 - custom `MergePolicy` support for domain rules, tombstones or CRDTs;
-- dependency-free Python API and JSON CLI.
+- an optional [publish-replica mode](#publish-replica-mode) that distributes a database
+  one way as an encrypted payload and materialises it as a separate read-only replica,
+  instead of merging it;
+- dependency-free Python API and JSON CLI (replica mode adds `cryptography`).
 
 ## Install
 
@@ -163,6 +166,9 @@ config_sha256 = hashlib.sha256(payload).hexdigest()
 | `secret_scan_skip_tables` | `[]` | Tables the scan ignores — use for a single noisy table instead of disabling the scan |
 | `secret_scan_extra_patterns` | `[]` | Additional regexes, on top of the trigger file |
 | `secret_patterns_file` | `null` (bundled file) | Path to your own trigger file; **replaces** the built-in patterns |
+| `key_file` | `null`, else `$SQLITE_TRANSIT_SYNC_KEY_FILE` | Fernet key for replica mode; must stay outside the transit |
+| `replica_root` | `~/.transit-replicas` | Where imported replicas are written; must stay outside the transit |
+| `allow_key_in_synced_folder` | `false` | Waives the check that refuses a key inside a cloud-sync folder |
 
 The `state` default in this table applies when a JSON configuration is loaded
 without that key. `sqlite-transit-sync init` instead writes
@@ -218,6 +224,57 @@ would flag checksums, UUIDs and git SHAs, which are legitimate database content 
 a scanner with a high false-positive rate gets switched off, which protects nothing.
 Treat a clean scan as "no known pattern matched", never as "this snapshot is free of
 secrets".
+
+## Publish-replica mode
+
+`push`/`pull` makes two databases converge. Sometimes that is not what you want: you want
+to *read* what another node knows, without merging any of it into your own rows — and the
+transport is a synchronised cloud folder that should not see your content in the clear.
+
+That is `publish` / `import-replica`. The import writes a **separate read-only database per
+source node** and never opens your local one:
+
+```text
+replica_root/
+  laptop/my-app.sqlite      <- read-only copy of laptop's database
+  workstation/my-app.sqlite <- read-only copy of workstation's database
+```
+
+```bash
+# once per key, on local disk - never inside the transit, never in a synced folder
+sqlite-transit-sync keygen --key-file ~/.keys/replica.key
+
+sqlite-transit-sync init --config node.json \
+  --database ./app.db --transit ./shared-transit \
+  --node-id laptop --namespace my-app \
+  --key-file ~/.keys/replica.key
+
+sqlite-transit-sync publish        --config node.json   # encrypt and publish
+sqlite-transit-sync replicas       --config node.json   # what other nodes offer
+sqlite-transit-sync import-replica --config node.json   # materialise them locally
+```
+
+Requires the optional cipher: `pip install 'sqlite-transit-sync[crypto]'`.
+
+**What travels** is not a database file but a curated SQL dump, gzip-compressed and
+Fernet-encrypted. On a real 53.6 MB knowledge database that is 11.0 MB in transit, because
+full-text index internals are rebuilt on arrival instead of shipped (35370 of 49636 dump
+statements). The publication passes the same gate as a merge snapshot — redaction,
+credential scan, `quick_check`, manifest.
+
+**What it protects:** the transport sees ciphertext, and Fernet's HMAC detects deliberate
+modification even when the manifest hash was recomputed to match.
+
+**What it does not:** Fernet authenticates the *key*, not the *sender* — anyone holding it
+can publish a valid snapshot. That is exactly why a replica is kept separate and never
+merged. Keep the key out of the transport: a key inside the transit directory is refused,
+and so is one in a folder that looks synchronised (override with
+`allow_key_in_synced_folder`). The same rule applies to `replica_root` — a decrypted
+replica inside the transit would be redistributed in the clear.
+
+**Limit:** a full-text index without its own content (`content=''`) cannot be rebuilt,
+because there is nothing to rebuild it from. Such tables are reported in the manifest as
+`contentless_fts` instead of arriving silently empty.
 
 ## This is not a secrets manager
 

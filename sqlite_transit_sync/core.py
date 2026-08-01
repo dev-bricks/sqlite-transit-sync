@@ -161,6 +161,11 @@ class SyncConfig:
     secret_scan_extra_patterns: tuple[str, ...] = ()
     secret_scan_skip_tables: tuple[str, ...] = ()
     secret_patterns_file: Path | None = None
+    # Publish-replica mode only (see replica.py). Unused by push/pull, so an existing
+    # configuration keeps working untouched.
+    key_file: Path | None = None
+    replica_root: Path | None = None
+    allow_key_in_synced_folder: bool = False
 
     def __post_init__(self) -> None:
         self.database = Path(self.database).expanduser().resolve()
@@ -175,8 +180,25 @@ class SyncConfig:
         self.secret_scan_skip_tables = tuple(self.secret_scan_skip_tables)
         if self.secret_patterns_file is not None:
             self.secret_patterns_file = Path(self.secret_patterns_file).expanduser().resolve()
+        # The key path may come from the environment so that a configuration file can
+        # be shared or version-controlled without naming a local credential location.
+        if self.key_file is None:
+            from_env = os.environ.get("SQLITE_TRANSIT_SYNC_KEY_FILE")
+            if from_env:
+                self.key_file = Path(from_env)
+        if self.key_file is not None:
+            self.key_file = Path(self.key_file).expanduser().resolve()
+        self.replica_root = (
+            Path(self.replica_root).expanduser().resolve()
+            if self.replica_root is not None
+            else Path.home() / ".transit-replicas"
+        )
         if self.database == self.transit or self.transit in self.database.parents:
             raise ValueError("The live database must not be inside the transit directory")
+        # An imported replica holds decrypted foreign data. Inside the transit it would
+        # be republished in the clear — the exact outcome the encryption prevents.
+        if self.replica_root == self.transit or self.transit in self.replica_root.parents:
+            raise ValueError("Replicas must not be stored inside the transit directory")
 
     @classmethod
     def from_file(cls, path: str | Path) -> "SyncConfig":
@@ -214,6 +236,9 @@ class SyncConfig:
                 if raw.get("secret_patterns_file")
                 else None
             ),
+            key_file=resolve(raw["key_file"]) if raw.get("key_file") else None,
+            replica_root=resolve(raw["replica_root"]) if raw.get("replica_root") else None,
+            allow_key_in_synced_folder=bool(raw.get("allow_key_in_synced_folder", False)),
         )
 
     def write(self, path: str | Path) -> Path:
@@ -233,6 +258,9 @@ class SyncConfig:
             "secret_patterns_file": (
                 str(self.secret_patterns_file) if self.secret_patterns_file else None
             ),
+            "key_file": str(self.key_file) if self.key_file else None,
+            "replica_root": str(self.replica_root) if self.replica_root else None,
+            "allow_key_in_synced_folder": self.allow_key_in_synced_folder,
         }
         _atomic_json_write(target, payload)
         return target

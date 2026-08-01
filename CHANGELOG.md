@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **Publish-replica mode (`publish` / `import-replica`), additive to `push`/`pull`.**
+  Distributes a database one way instead of converging two: the import materialises a
+  separate read-only replica per source node under `replica_root` and never touches the
+  local database. Payload is a curated SQL dump, gzip-compressed and Fernet-encrypted, so a
+  synchronised cloud folder no longer carries readable content. New config keys `key_file`,
+  `replica_root` and `allow_key_in_synced_folder`; new CLI commands `keygen`, `publish`,
+  `replicas` and `import-replica`. See ADR-006 to ADR-008.
+- **Restore FTS databases correctly.** A plain `iterdump` cannot be replayed when the
+  database contains a full-text index: it writes the virtual table through
+  `PRAGMA writable_schema` without a schema reload, then re-emits the shadow tables that
+  `CREATE VIRTUAL TABLE` creates itself. The dump is now curated and the index rebuilt after
+  import — which also removed 35370 of 49636 statements on a real database.
+- **Fix credential-scan false positives that blocked publication.** Vendor prefixes had no
+  left anchor, so `sk-` matched inside ordinary words — `task-scheduler`, `ask-2026`,
+  `risk-and-reward`. Because the scan is fail-closed, this stopped a clean 53 MB database
+  from being published: 33 hits, all words, no credential. All prefixes are now anchored
+  with `(?<![A-Za-z0-9])`; triggers file bumped to version 2.
+- **Metadata tests compare sources instead of a literal.** `test_version_consistency` and
+  `test_llms_txt_version_parity` asserted the string `0.2.0`, so every release required a
+  test edit and a partial bump would still pass — the one failure the tests exist to catch.
+  They now compare `__version__`, `pyproject.toml` and `llms.txt` against each other.
+- Optional dependency `crypto` (`cryptography`). The core stays dependency free: only
+  replica mode encrypts.
+
 - **Dokumentation, SEO & Discoverability**: `llms.txt` Verifikations-Timestamp auf 2026-08-01 aktualisiert, Shields.io Badges für Ecosystem (`dev-bricks`) und Umbrella (`open-bricks`) in `README.md` & `README_de.md` integriert, 26/26 Pytest-Tests verifiziert [G 2026-08-01].
 - Close every backup into `DELETE` journal mode before publication and remove the
   complete temporary SQLite artifact family on backup, redaction, credential-scan,
