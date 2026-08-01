@@ -390,6 +390,29 @@ class TransitSyncTests(unittest.TestCase):
         snapshot = TransitSync(config).push()
         self.assertTrue(snapshot.path.is_file())
 
+    def test_vendor_prefixes_do_not_match_inside_ordinary_words(self) -> None:
+        # A credential prefix starts a token; it never continues a word. Without a
+        # left anchor, "sk-" matches inside "task-scheduler" and "ask-2026" — and
+        # since the scan is fail-closed, such a hit blocks publication of an
+        # otherwise clean database. Found on a real knowledge base: 33 hits, all words.
+        self._set_item_value(
+            self.a_db,
+            "run antigravity-task-scheduler, see /analysen/ask-2026-auswertung "
+            "and the risk-and-reward-analysis in Task-Management-Uebersicht",
+        )
+        snapshot = self.a.push()
+        self.assertTrue(snapshot.path.is_file())
+
+    def test_vendor_prefixes_still_match_a_real_key_in_context(self) -> None:
+        # The counterpart to the test above: the anchor must not blind the scanner
+        # to a key that sits after quotes, equals signs or whitespace.
+        for prefix, filler in (("sk-", "A" * 32), ("sk-ant-api03-", "B" * 40), ("ghp_", "C" * 36)):
+            with self.subTest(prefix=prefix):
+                self._set_item_value(self.a_db, 'config: {"api_key": "' + prefix + filler + '"}')
+                with self.assertRaises(SyncError):
+                    self.a.push()
+                self.assertEqual([], transit_files(self.transit))
+
     def test_bundled_trigger_file_is_present_and_loadable(self) -> None:
         # Guards the packaging side: without package-data the JSON never reaches
         # an installed wheel and every push would fail.
