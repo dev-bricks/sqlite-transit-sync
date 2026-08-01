@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Dokumentation, SEO & Discoverability**: `llms.txt` Verifikations-Timestamp auf 2026-08-01 aktualisiert, Shields.io Badges für Ecosystem (`dev-bricks`) und Umbrella (`open-bricks`) in `README.md` & `README_de.md` integriert, 26/26 Pytest-Tests verifiziert [G 2026-08-01].
 - Close every backup into `DELETE` journal mode before publication and remove the
   complete temporary SQLite artifact family on backup, redaction, credential-scan,
   verification, or manifest failure. WAL source databases can no longer leave
