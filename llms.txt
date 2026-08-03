@@ -126,7 +126,7 @@ for r in reports:
 
 ## Repository & Ecosystem Links
 
-- **Repository**: [dev-bricks/sqlite-transit-sync](https://github.com/dev-bricks/sqlite-transit-sync)
+- **Repository**: [ellmos-ai/sqlite-transit-sync](https://github.com/ellmos-ai/sqlite-transit-sync)
 - **File Transport Companion**: [dev-bricks/sync-master](https://github.com/dev-bricks/sync-master)
 - **Ecosystem Catalog**: [ellmos-ai/stacks](https://github.com/ellmos-ai/stacks)
 - **Main Organization**: [dev-bricks](https://github.com/dev-bricks)

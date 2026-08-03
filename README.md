@@ -5,7 +5,7 @@
 
 [English](README.md) | [Deutsch](README_de.md)
 
-[![License](https://img.shields.io/github/license/dev-bricks/sqlite-transit-sync)](LICENSE)
+[![License](https://img.shields.io/github/license/ellmos-ai/sqlite-transit-sync)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python->=3.10-blue.svg)](https://www.python.org/)
 [![Ecosystem: dev-bricks](https://img.shields.io/badge/Ecosystem-dev--bricks-blue.svg)](https://github.com/dev-bricks)
 [![Umbrella: open-bricks](https://img.shields.io/badge/Umbrella-open--bricks-purple.svg)](https://github.com/open-bricks)

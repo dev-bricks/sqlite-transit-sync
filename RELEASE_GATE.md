@@ -74,7 +74,7 @@ Additional checks performed beyond the automated gate:
 | **Responsible** | Lukas Geiger (@lukisch) |
 | **Review Date** | 2026-07-23 |
 | **Decision** | UNLOCKED |
-| **Remarks** | Neutral extraction from BACH ProSync, no user-specific dependencies. Published to `dev-bricks/sqlite-transit-sync` per explicit user decision (same organization as its companion module `sync-master`). |
+| **Remarks** | Neutral extraction from BACH ProSync, no user-specific dependencies. Published as `ellmos-ai/sqlite-transit-sync`; its companion module remains `dev-bricks/sync-master`. |
 
 ---
 

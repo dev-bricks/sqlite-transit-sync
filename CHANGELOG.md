@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Discoverability:** corrected the canonical repository owner from `dev-bricks` to
+  `ellmos-ai` in package metadata, `llms.txt`, release documentation, and README
+  license badges so external package and GitHub links resolve to the live repository.
+
 - **The one-way mode is now called Republica** (subtitle: "the showcase method"). Each node
   puts an encrypted showcase of its database into a shared file area; everyone can look,
   nobody can change it. Renamed throughout: module `republica.py`, `RepublicaTransit`,
