@@ -20,7 +20,7 @@ Issues = "https://github.com/ellmos-ai/sqlite-transit-sync/issues"
 Documentation = "https://github.com/ellmos-ai/sqlite-transit-sync/blob/main/README.md"
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "cryptography>=42"]
+dev = ["pytest>=7", "cryptography>=42", "tomli>=2; python_version < '3.11'"]
 # The core stays dependency free on purpose: push/pull needs nothing but the standard
 # library. Only publish-replica mode encrypts, so its cipher is opt-in.
 crypto = ["cryptography>=42"]
