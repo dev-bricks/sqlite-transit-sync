@@ -447,7 +447,7 @@ Siehe [ARCHITECTURE.md](ARCHITECTURE.md), [README.md](README.md) und
 
 Geprüfte Discovery-Projektion für `module:sqlite-transit-sync` aus
 `catalog:v4-bundles`
-(`7f6121371fd05d85d32c2e75f8fbdb682aa76ebdf879dd40d36ceefb4aae18d3`).
+(`546290dafbaafd810df1d59ef5a3d7183738472b48cd5a8a81f1e8f2b64d852e`).
 Das Ziel-Repository ist `public`. Die Bundle-Manifeste bleiben die Autorität
 für Mitgliedschaften; dieser Abschnitt installiert oder aktiviert keine
 Komponenten. Die Freigabe beruht auf einem öffentlichen Modul-Registry-Eintrag
@@ -457,8 +457,9 @@ und einer ausdrücklichen Default-deny-Allowlist für Bundles.
 
 - Sichtbarkeit des Bundle-Rezepts: `private`; Rolle: `declared-component`;
   Anforderung: `recommended`.
-- Modulpartner: `module:cloud-safe-exporter`, `module:receipt-validator`,
-  `module:sync`, `module:system-explorer-export`, `module:system-gap-master`.
+- Modulpartner: `module:cloud-safe-exporter`, `module:direct-beam`,
+  `module:receipt-validator`, `module:sync`, `module:system-explorer-export`,
+  `module:system-gap-master`.
 - Skill-Partner: `skill:agent-config-sync`, `skill:mcp-config-sync`,
   `skill:system-onboarding`.
 
