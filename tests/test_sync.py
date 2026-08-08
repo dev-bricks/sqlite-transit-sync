@@ -163,6 +163,40 @@ class TransitSyncTests(unittest.TestCase):
             self.b.pull()
         self.assertFalse((self.root / "b-state.json").exists())
 
+    def test_pull_selected_merges_only_the_requested_pending_snapshot(self) -> None:
+        first = add_fixture_snapshot(self.a, "node-a", "20260101T000000000000Z")
+        second = add_fixture_snapshot(self.a, "node-c", "20260102T000000000000Z")
+
+        reports = self.b.pull_selected([second[0].name])
+
+        self.assertEqual([second[0].name], [report.snapshot for report in reports])
+        self.assertEqual([first[0].name], [snapshot.path.name for snapshot in self.b.pending()])
+        state = json.loads((self.root / "b-state.json").read_text(encoding="utf-8"))
+        self.assertIn("node-c", state["last_pulled"])
+        self.assertNotIn("node-a", state["last_pulled"])
+
+    def test_pull_selected_dry_run_does_not_advance_state(self) -> None:
+        snapshot = add_fixture_snapshot(self.a, "node-a", "20260101T000000000000Z")
+
+        reports = self.b.pull_selected([snapshot[0].name], dry_run=True)
+
+        self.assertEqual([snapshot[0].name], [report.snapshot for report in reports])
+        self.assertFalse((self.root / "b-state.json").exists())
+        self.assertEqual([snapshot[0].name], [item.path.name for item in self.b.pending()])
+
+    def test_pull_selected_rejects_unsafe_duplicate_or_non_pending_names(self) -> None:
+        snapshot = add_fixture_snapshot(self.a, "node-a", "20260101T000000000000Z")
+
+        with self.assertRaises(ValueError):
+            self.b.pull_selected(snapshot[0].name)
+        with self.assertRaises(ValueError):
+            self.b.pull_selected([snapshot[0].name, snapshot[0].name])
+        with self.assertRaises(ValueError):
+            self.b.pull_selected([f"..\\{snapshot[0].name}"])
+        with self.assertRaises(SyncError):
+            self.b.pull_selected(["demo__node-z__20260101T000000000000Z.sqlite-snapshot"])
+        self.assertFalse((self.root / "b-state.json").exists())
+
     def test_config_roundtrip_and_relative_paths(self) -> None:
         config_path = self.root / "config" / "node.json"
         config_path.parent.mkdir()

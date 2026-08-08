@@ -373,10 +373,22 @@ from sqlite_transit_sync import SyncConfig, TransitSync
 
 sync = TransitSync(SyncConfig.from_file("node.json"))
 snapshot = sync.push()
+pending = sync.pending()
+selected_reports = sync.pull_selected([pending[-1].path.name]) if pending else []
 reports = sync.pull()
 cleanup_plan = sync.cleanup()
-print(snapshot.sha256, [report.as_dict() for report in reports], cleanup_plan)
+print(
+    snapshot.sha256,
+    [report.as_dict() for report in reports],
+    [report.as_dict() for report in selected_reports],
+    cleanup_plan,
+)
 ```
+
+`pull_selected()` verarbeitet nur ausdrücklich benannte, aktuell ausstehende Snapshots und nutzt
+dabei dieselben Prüf-, Merge- und State-Gates wie `pull()`. Damit können dünne Lebenszyklus-
+Adapter beispielsweise bewusst nur den neuesten zulässigen Fremdstand ziehen, ohne die
+Datenmechanik zu kopieren.
 
 Wenn Timestamp-LWW nicht ausreicht, kann `TransitSync` ein Objekt erhalten, das
 `MergePolicy.merge(local, remote, snapshot)` implementiert.

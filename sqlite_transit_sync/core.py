@@ -882,8 +882,12 @@ class TransitSync:
             and snapshot.created_at > last_pulled.get(snapshot.node_id, "")
         ]
 
-    def pull(self, dry_run: bool = False) -> list[MergeReport]:
-        pending = self.pending(verify=True)
+    def _pull_snapshots(
+        self,
+        pending: Sequence[Snapshot],
+        *,
+        dry_run: bool,
+    ) -> list[MergeReport]:
         if dry_run:
             return [MergeReport(snapshot=item.path.name, source_node=item.node_id) for item in pending]
         if not self.config.database.is_file():
@@ -916,6 +920,48 @@ class TransitSync:
             self._save_state(state)
             reports.append(report)
         return reports
+
+    def pull(self, dry_run: bool = False) -> list[MergeReport]:
+        """Merge every pending verified snapshot in deterministic order."""
+
+        return self._pull_snapshots(self.pending(verify=True), dry_run=dry_run)
+
+    def pull_selected(
+        self,
+        snapshot_names: Sequence[str],
+        dry_run: bool = False,
+    ) -> list[MergeReport]:
+        """Merge only explicitly selected pending snapshots.
+
+        Selection uses snapshot basenames returned by :meth:`pending`; paths,
+        manifest names, duplicates and snapshots that are no longer pending are
+        rejected before the local database or sync state is changed. This keeps
+        application adapters from reimplementing merge and state advancement
+        when their lifecycle deliberately processes one pending snapshot.
+        """
+
+        if isinstance(snapshot_names, (str, bytes)):
+            raise ValueError("snapshot_names must be a sequence of snapshot basenames")
+        requested = list(snapshot_names)
+        if not requested:
+            return []
+        if any(not isinstance(name, str) for name in requested):
+            raise ValueError("snapshot_names must contain only strings")
+        if len(requested) != len(set(requested)):
+            raise ValueError("snapshot_names must not contain duplicates")
+        for name in requested:
+            if Path(name).name != name or not name.endswith(SNAPSHOT_SUFFIX):
+                raise ValueError(f"Invalid snapshot basename: {name!r}")
+
+        pending = self.pending(verify=True)
+        by_name = {snapshot.path.name: snapshot for snapshot in pending}
+        missing = [name for name in requested if name not in by_name]
+        if missing:
+            raise SyncError(
+                "Selected snapshots are not pending: " + ", ".join(sorted(missing))
+            )
+        selected = [by_name[name] for name in requested]
+        return self._pull_snapshots(selected, dry_run=dry_run)
 
     def sync(self) -> dict[str, Any]:
         pulled = self.pull()

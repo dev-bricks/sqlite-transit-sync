@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Selected pending pull:** new `TransitSync.pull_selected()` lets lifecycle adapters process
+  an explicit verified pending subset while reusing the carrier's merge transaction and state
+  advancement. Paths, manifest names, duplicates and non-pending names fail before mutation.
+
 - **Conservative direct-snapshot cleanup:** new `TransitSync.cleanup()` and CLI
   `cleanup` select artifacts by age and per-node minimum retention. The operation verifies
   manifest, SHA-256 and SQLite integrity first, is a dry-run by default, manages only the

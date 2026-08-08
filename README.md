@@ -79,6 +79,8 @@ application-selectable merge policies.
 - custom `MergePolicy` support for domain rules, tombstones or CRDTs;
 - verified snapshot cleanup with a dry-run default, local-node scope by default,
   and explicit opt-ins for deletion and foreign-node administration;
+- selected pending pulls for thin application lifecycle adapters without duplicating merge or
+  state-advancement logic;
 - an optional [Republica showcase mode](#republica--the-showcase-method) that distributes a database
   one way as an encrypted payload and materialises it as a separate read-only showcase,
   instead of merging it;
@@ -355,10 +357,21 @@ from sqlite_transit_sync import SyncConfig, TransitSync
 
 sync = TransitSync(SyncConfig.from_file("node.json"))
 snapshot = sync.push()
+pending = sync.pending()
+selected_reports = sync.pull_selected([pending[-1].path.name]) if pending else []
 reports = sync.pull()
 cleanup_plan = sync.cleanup()
-print(snapshot.sha256, [report.as_dict() for report in reports], cleanup_plan)
+print(
+    snapshot.sha256,
+    [report.as_dict() for report in reports],
+    [report.as_dict() for report in selected_reports],
+    cleanup_plan,
+)
 ```
+
+`pull_selected()` accepts only explicitly named snapshots that are currently pending and reuses
+the same verification, merge and state gates as `pull()`. A thin lifecycle adapter can therefore
+choose one eligible snapshot without copying the carrier's data mechanics.
 
 Pass an object implementing `MergePolicy.merge(local, remote, snapshot)` to
 `TransitSync` when timestamp LWW is not sufficient.

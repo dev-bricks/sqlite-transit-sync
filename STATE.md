@@ -18,6 +18,8 @@
 - Credential-Scan des Snapshot-Inhalts vor Veröffentlichung (fail-closed, ADR-005)
 - direkte Snapshot-Aufbewahrung über verifizierendes `cleanup`, standardmäßig Dry-Run
   und auf den lokalen Knoten begrenzt (ADR-011)
+- gezielter Pull eines ausdrücklich ausgewählten Pending-Ausschnitts für dünne
+  Lebenszyklus-Adapter, mit denselben Prüf-, Transaktions- und State-Gates (ADR-012)
 - eigenständige synthetische Tests
 
 ## Noch nicht integriert
@@ -32,3 +34,4 @@
 
 - 2026-08-08: konservative Bereinigung direkter Snapshots samt CLI, Tests und
   zweisprachiger Dokumentation ergänzt.
+- 2026-08-08: sichere `pull_selected`-API für anwendungsspezifische Lebenszyklus-Adapter ergänzt.

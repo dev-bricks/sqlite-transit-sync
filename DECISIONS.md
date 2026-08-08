@@ -191,3 +191,16 @@ einzige noch verfügbare Kopie sein; ihre Verwaltung erfordert deshalb zusätzli
 `--all-nodes`. Die Parameter bleiben Sache der integrierenden Anwendung. Republica-Artefakte
 sind ein anderes Format mit eigener Vertrauens- und Aufbewahrungsgrenze und werden von diesem
 Mechanismus nicht berührt.
+
+## ADR-012: Lebenszyklus-Adapter dürfen einen geprüften Pending-Ausschnitt wählen
+
+Der neutrale Standard `pull()` verarbeitet weiterhin alle ausstehenden Snapshots. Manche
+Anwendungen besitzen jedoch bewusst eine andere Lebenszyklus-Policy, etwa „pro Start nur den
+neuesten zulässigen Fremdstand“. Ohne Carrier-Schnittstelle müsste ein solcher Adapter Merge,
+Transaktion und State-Fortschreibung kopieren; er wäre damit kein dünner Adapter mehr.
+
+`pull_selected()` akzeptiert deshalb ausschließlich Snapshot-Basisnamen, die `pending()` aktuell
+liefert. Pfade, Manifestnamen, Duplikate und nicht mehr ausstehende Namen werden vor jeder
+Änderung abgelehnt. Der ausgewählte Snapshot durchläuft anschließend exakt dieselbe Verifikation,
+Merge-Transaktion und State-Fortschreibung wie `pull()`. Die Auswahl ist Anwendungspolitik; die
+Datenmechanik bleibt beim Carrier.
