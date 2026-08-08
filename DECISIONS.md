@@ -178,3 +178,16 @@ Index-Interna.
 es nichts gibt, woraus `rebuild` lesen könnte. Solche Tabellen werden im Manifest unter
 `contentless_fts` gemeldet, statt stillschweigend leer anzukommen.
 
+## ADR-011: Snapshot-Bereinigung braucht getrennte Auswahl- und Freigabegates
+
+Aufbewahrung ist eine administrative Entscheidung, kein Nebeneffekt von `push` oder `sync`.
+`cleanup` plant daher standardmäßig nur: Es prüft Manifest, Dateigröße, SHA-256 und
+`PRAGMA quick_check`, wählt Snapshots nur dann aus, wenn sie sowohl älter als die
+Aufbewahrungsfrist als auch außerhalb der neuesten Mindestanzahl liegen, und löscht erst mit
+ausdrücklichem `--apply`.
+
+Der Standardbereich ist der eigene Knoten. Fremde Snapshots können für andere Teilnehmer die
+einzige noch verfügbare Kopie sein; ihre Verwaltung erfordert deshalb zusätzlich
+`--all-nodes`. Die Parameter bleiben Sache der integrierenden Anwendung. Republica-Artefakte
+sind ein anderes Format mit eigener Vertrauens- und Aufbewahrungsgrenze und werden von diesem
+Mechanismus nicht berührt.

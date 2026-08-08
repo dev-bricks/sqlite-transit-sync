@@ -2,14 +2,14 @@
 
 > Local-first SQLite synchronization through verified transit snapshots and configurable row-level merge policies. Extracted from the BACH ProSync architecture for standalone, zero-dependency Python projects.
 
-- Last-checked: 2026-08-01
+- Last-checked: 2026-08-08
 - Version: 0.4.0
 - Architecture: Local-First / Zero-Dependency / Snapshot-based Transit
 - Module Family: `dev-bricks/sync-master` companion (`sync.database`)
 
 ## System Overview
 
-`sqlite-transit-sync` is a Python 3.10+ library (zero dependencies for merge mode; the optional Republica mode adds `cryptography`) and CLI for synchronizing local SQLite databases across untrusted or asynchronous file transports (shared folders, object-store mounts, removable drives, or sync-master yards). Verified 55/55 passing test suite on 2026-08-01.
+`sqlite-transit-sync` is a Python 3.10+ library (zero dependencies for merge mode; the optional Republica mode adds `cryptography`) and CLI for synchronizing local SQLite databases across untrusted or asynchronous file transports (shared folders, object-store mounts, removable drives, or sync-master yards). Verified 66/66 passing test suite on 2026-08-08.
 
 It avoids live SQLite database locking over file sync by using:
 1. Online consistent snapshots via SQLite Backup API (`sqlite3.Connection.backup`).
@@ -24,6 +24,7 @@ It avoids live SQLite database locking over file sync by using:
 - **Atomic & Safe Transit**: Never syncs live SQLite files directly. Uses isolated snapshot zones.
 - **Configurable Merge Policies**: Built-in `LastWriteWinsPolicy` and support for custom domain `MergePolicy` implementations (tombstones, CRDTs).
 - **Data Privacy & Exclusion**: Exclude sensitive tables from transit snapshots with post-delete `VACUUM`.
+- **Conservative Retention**: `cleanup` verifies snapshot pairs and only plans local-node deletion by default; `--apply` and `--all-nodes` are explicit authority gates.
 - **CLI & Python API**: Declarative JSON configuration (`node.json`) and programmatic `TransitSync` API.
 
 ## Core Workflows & CLI Reference
@@ -51,6 +52,9 @@ sqlite-transit-sync status --config node.json
 
 # Verify integrity of local database and transit manifests
 sqlite-transit-sync verify --config node.json
+
+# Plan retention cleanup (dry-run); add --apply only after reviewing the JSON result
+sqlite-transit-sync cleanup --config node.json [--keep-days 7] [--keep-per-node 10] [--all-nodes] [--apply]
 ```
 
 ### Republica - the showcase method (one-way, encrypted; requires `[crypto]` extra)
@@ -113,6 +117,9 @@ print(f"Snapshot created: {snapshot.sha256}")
 reports = sync.pull()
 for r in reports:
     print(f"Merged node {r.source_node_id}: {r.rows_inserted} inserted, {r.rows_updated} updated")
+
+# Dry-run by default; manages this node only unless include_foreign=True
+cleanup_plan = sync.cleanup(keep_days=7, keep_per_node=10)
 ```
 
 ## Recommended Search Phrases

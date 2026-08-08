@@ -6,6 +6,10 @@ Use the module only with local live databases and a transport whose participants
 trusted. Keep node state outside the shared transport. Restrict filesystem access to
 database, state and transit paths.
 
+`cleanup` verifies each managed snapshot and manifest before selecting it. It is a dry-run
+and local-node-only operation by default. Treat `--apply --all-nodes` as administrative
+authority over other publishers' artifacts, and review the JSON plan before granting it.
+
 ## Required application review
 
 Before deployment, define:

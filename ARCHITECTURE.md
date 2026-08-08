@@ -69,7 +69,7 @@ The key travels out of band and must live outside the transport; the same applie
 ## Components
 
 - `SyncConfig`: resolves paths and defines node, namespace, timestamps and exclusions.
-- `TransitSync`: publishes, discovers, verifies, pulls and records local state.
+- `TransitSync`: publishes, discovers, verifies, pulls, prunes direct snapshots and records local state.
 - `Snapshot`: immutable reference to a database snapshot and its manifest.
 - `MergePolicy`: application extension point.
 - `TimestampMergePolicy`: safe generic baseline for timestamped rows with primary keys.
@@ -105,6 +105,7 @@ origin must not change local rows.
 ## Relationship to BACH ProSync
 
 BACH remains the production integration and owns BACH-specific table semantics,
-startup/exit hooks, heartbeat, retention and secret handling. This module is the
-neutral reusable core. A future BACH adapter can replace duplicated generic mechanics
-only after compatibility and migration tests.
+startup/exit hooks, heartbeat, retention parameters and secret handling. This module is the
+neutral reusable core, including a conservative direct-snapshot cleanup mechanism. A future
+BACH adapter can replace duplicated generic mechanics only after compatibility and migration
+tests.

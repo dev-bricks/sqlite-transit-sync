@@ -10,7 +10,7 @@
 [![Ecosystem: dev-bricks](https://img.shields.io/badge/Ecosystem-dev--bricks-blue.svg)](https://github.com/dev-bricks)
 [![Umbrella: open-bricks](https://img.shields.io/badge/Umbrella-open--bricks-purple.svg)](https://github.com/open-bricks)
 [![Architecture](https://img.shields.io/badge/architecture-local--first-success.svg)](#part-of-the-ellmos-stack-family)
-[![Tests](https://img.shields.io/badge/tests-55%2F55%20passed-brightgreen.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-66%2F66%20passed-brightgreen.svg)](#tests)
 [![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
 
 > [!NOTE]
@@ -77,6 +77,8 @@ application-selectable merge policies.
   contains credential-shaped values (on by default; reports `table.column`, never
   the value itself);
 - custom `MergePolicy` support for domain rules, tombstones or CRDTs;
+- verified snapshot cleanup with a dry-run default, local-node scope by default,
+  and explicit opt-ins for deletion and foreign-node administration;
 - an optional [Republica showcase mode](#republica--the-showcase-method) that distributes a database
   one way as an encrypted payload and materialises it as a separate read-only showcase,
   instead of merging it;
@@ -106,6 +108,9 @@ sqlite-transit-sync pull --config node.json --dry-run
 sqlite-transit-sync pull --config node.json
 sqlite-transit-sync status --config node.json
 sqlite-transit-sync verify --config node.json
+sqlite-transit-sync cleanup --config node.json
+# Review the JSON plan, then explicitly apply it:
+sqlite-transit-sync cleanup --config node.json --apply
 ```
 
 The application schema must already exist on each node. Automatic first-copy
@@ -351,7 +356,8 @@ from sqlite_transit_sync import SyncConfig, TransitSync
 sync = TransitSync(SyncConfig.from_file("node.json"))
 snapshot = sync.push()
 reports = sync.pull()
-print(snapshot.sha256, [report.as_dict() for report in reports])
+cleanup_plan = sync.cleanup()
+print(snapshot.sha256, [report.as_dict() for report in reports], cleanup_plan)
 ```
 
 Pass an object implementing `MergePolicy.merge(local, remote, snapshot)` to
@@ -414,8 +420,10 @@ across several permanently operated nodes.
 - Snapshot redaction deletes listed tables and VACUUMs the snapshot, but it must
   still list every table containing credentials or private data; the generic
   module cannot discover domain secrets reliably.
-- Application migrations, clock policy, retention and conflict semantics stay
-  with the integrating application.
+- Application migrations, clock policy, retention parameters and conflict semantics stay
+  with the integrating application. `cleanup` supplies only the mechanism: it verifies every
+  pair, performs a dry-run by default, keeps the newest ten snapshots per node, and manages
+  foreign nodes only when `--all-nodes` is explicit.
 - Run only one sync process per node unless the host application adds a process lock.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md), [README_de.md](README_de.md) and

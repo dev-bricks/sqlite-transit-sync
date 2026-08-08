@@ -48,6 +48,24 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "pull":
             command.add_argument("--dry-run", action="store_true")
 
+    cleanup = sub.add_parser(
+        "cleanup",
+        help="Select old snapshots; deletion requires --apply",
+    )
+    cleanup.add_argument("--config", required=True)
+    cleanup.add_argument("--keep-days", type=int, default=7)
+    cleanup.add_argument("--keep-per-node", type=int, default=10)
+    cleanup.add_argument(
+        "--all-nodes",
+        action="store_true",
+        help="Also manage snapshots published by other nodes",
+    )
+    cleanup.add_argument(
+        "--apply",
+        action="store_true",
+        help="Delete eligible snapshot and manifest pairs (default: dry-run)",
+    )
+
     # Republica ("showcase method"): one-way, encrypted, never merged.
     sub.add_parser(
         "republica-publish", help="Publish this node's database as an encrypted showcase"
@@ -170,6 +188,13 @@ def main(argv: list[str] | None = None) -> int:
             result = sync.verify()
         elif args.command == "list":
             result = [snapshot.as_dict() for snapshot in sync.snapshots(verify=False)]
+        elif args.command == "cleanup":
+            result = sync.cleanup(
+                keep_days=args.keep_days,
+                keep_per_node=args.keep_per_node,
+                include_foreign=args.all_nodes,
+                dry_run=not args.apply,
+            )
         else:
             raise AssertionError(args.command)
         _print({"ok": True, "result": result})
@@ -181,4 +206,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

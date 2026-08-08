@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Conservative direct-snapshot cleanup:** new `TransitSync.cleanup()` and CLI
+  `cleanup` select artifacts by age and per-node minimum retention. The operation verifies
+  manifest, SHA-256 and SQLite integrity first, is a dry-run by default, manages only the
+  local node by default, and requires both `--all-nodes` and `--apply` before deleting
+  foreign-node snapshot/manifest pairs.
+
 - **Discoverability:** corrected the canonical repository owner from `dev-bricks` to
   `ellmos-ai` in package metadata, `llms.txt`, release documentation, and README
   license badges so external package and GitHub links resolve to the live repository.

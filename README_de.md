@@ -10,7 +10,7 @@
 [![Ecosystem: dev-bricks](https://img.shields.io/badge/Ecosystem-dev--bricks-blue.svg)](https://github.com/dev-bricks)
 [![Umbrella: open-bricks](https://img.shields.io/badge/Umbrella-open--bricks-purple.svg)](https://github.com/open-bricks)
 [![Architecture](https://img.shields.io/badge/architecture-local--first-success.svg)](#teil-der-ellmos-stack-familie)
-[![Tests](https://img.shields.io/badge/tests-55%2F55%20passed-brightgreen.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-66%2F66%20passed-brightgreen.svg)](#tests)
 [![llms.txt](https://img.shields.io/badge/llms.txt-available-informational.svg)](llms.txt)
 
 > [!NOTE]
@@ -79,6 +79,9 @@ geprüfte Snapshots mit von der Anwendung wählbaren Merge-Policies.
   Snapshot weiterhin zugangsdatenähnliche Werte enthält (standardmäßig aktiv;
   gemeldet wird `table.column`, niemals der Wert selbst);
 - eigene `MergePolicy` für fachliche Regeln, Tombstones oder CRDTs;
+- Bereinigung geprüfter Snapshots mit Dry-Run als Standard, standardmäßiger Begrenzung
+  auf den lokalen Knoten sowie ausdrücklichen Freigaben für Löschung und Verwaltung
+  fremder Knoten;
 - optionaler [Republica-Schaufenster-Modus](#republica--die-schaufenster-methode), der eine Datenbank
   einseitig als verschlüsselte Nutzlast verteilt und als eigenständige,
   schreibgeschütztes Schaufenster materialisiert, statt sie zu mergen;
@@ -110,6 +113,9 @@ sqlite-transit-sync pull --config node.json --dry-run
 sqlite-transit-sync pull --config node.json
 sqlite-transit-sync status --config node.json
 sqlite-transit-sync verify --config node.json
+sqlite-transit-sync cleanup --config node.json
+# JSON-Plan prüfen und anschließend ausdrücklich anwenden:
+sqlite-transit-sync cleanup --config node.json --apply
 ```
 
 Das Anwendungsschema muss auf jedem Knoten bereits existieren. Ein automatisches
@@ -368,7 +374,8 @@ from sqlite_transit_sync import SyncConfig, TransitSync
 sync = TransitSync(SyncConfig.from_file("node.json"))
 snapshot = sync.push()
 reports = sync.pull()
-print(snapshot.sha256, [report.as_dict() for report in reports])
+cleanup_plan = sync.cleanup()
+print(snapshot.sha256, [report.as_dict() for report in reports], cleanup_plan)
 ```
 
 Wenn Timestamp-LWW nicht ausreicht, kann `TransitSync` ein Objekt erhalten, das
@@ -433,8 +440,10 @@ Ausfall einzelner Server über mehrere dauerhaft betriebene Knoten überstehen m
 - Snapshot-Redaktion löscht gelistete Tabellen und führt anschließend `VACUUM` aus.
   Trotzdem muss jede Tabelle mit Zugangsdaten oder privaten Daten gelistet werden;
   das generische Modul kann fachliche Secrets nicht zuverlässig erkennen.
-- Anwendungsmigrationen, Clock Policy, Aufbewahrung und Konfliktsemantik bleiben bei
-  der integrierenden Anwendung.
+- Anwendungsmigrationen, Clock Policy, Aufbewahrungsparameter und Konfliktsemantik bleiben
+  bei der integrierenden Anwendung. `cleanup` stellt nur den Mechanismus bereit: Jedes Paar
+  wird geprüft, der Standard ist ein Dry-Run, die neuesten zehn Snapshots je Knoten bleiben
+  erhalten und fremde Knoten werden nur mit ausdrücklichem `--all-nodes` verwaltet.
 - Pro Knoten darf ohne zusätzlichen Prozess-Lock der Host-Anwendung nur ein
   Synchronisierungsprozess laufen.
 

@@ -1,6 +1,6 @@
 # STATE.md
 
-**Stand:** 2026-07-11  
+**Stand:** 2026-08-08
 **Phase:** Alpha / neutrale Extraktion abgeschlossen
 
 ## Funktionsfähig
@@ -16,6 +16,8 @@
 - Schema-Drift über gemeinsame Spalten
 - Merge-Ausschlüsse und Snapshot-Redaktion
 - Credential-Scan des Snapshot-Inhalts vor Veröffentlichung (fail-closed, ADR-005)
+- direkte Snapshot-Aufbewahrung über verifizierendes `cleanup`, standardmäßig Dry-Run
+  und auf den lokalen Knoten begrenzt (ADR-011)
 - eigenständige synthetische Tests
 
 ## Noch nicht integriert
@@ -23,10 +25,10 @@
 - BACH nutzt weiterhin seine bewährte interne ProSync-Implementierung.
 - Es gibt noch keinen Signatur-/Authentifizierungsadapter. Fernet im Replica-Modus
   authentifiziert den Schlüssel, nicht den Absender — Knoten-Identität bleibt offen.
-- Retention und Tombstones bleiben anwendungsspezifisch.
+- Aufbewahrungsparameter und Tombstones bleiben anwendungsspezifisch.
 - Replica-Snapshots werden im Transit nicht automatisch aufgeräumt (siehe Retention).
 
 ## Letzte Dokumentationsänderung
 
-- 2026-07-11: `README.md` und `README_de.md` um den vollständigen Vergleich mit
-  Distributed SQL, Vor-/Nachteile, Use Cases und Entscheidungshilfe ergänzt.
+- 2026-08-08: konservative Bereinigung direkter Snapshots samt CLI, Tests und
+  zweisprachiger Dokumentation ergänzt.

@@ -10,7 +10,9 @@
       nicht rekonstruierbar. Falls ein Anwendungsfall auftaucht, Schattentabellen mitführen.
 - [ ] Referenzadapter für Tombstone-basierte Löschsynchronisation ergänzen.
 - [ ] BACH-Kompatibilitätsadapter erst nach goldenem Vergleichstest evaluieren.
-- [ ] Retention als austauschbare Policy ergänzen, ohne fremde Snapshots unkontrolliert zu löschen.
+- [x] Retention für direkte Transit-Snapshots ergänzt: verifizierendes `cleanup`, Dry-Run
+      als Standard, lokaler Knoten als Standardbereich und fremde Knoten nur nach
+      ausdrücklicher Freigabe. Republica-Retention bleibt separat offen.
 - [x] Paket- und Release-Gates vor einer öffentlichen Veröffentlichung durchführen.
 
 ---
@@ -31,4 +33,3 @@
 
 **Audit Date:** 2026-07-23
 **Gate Check Exit Code:** `0`
-
